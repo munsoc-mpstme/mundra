@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     mail_from_name: str = "Tech - MUNSociety MPSTME"
     mail_port: int = 465
     mail_server: str
-    docs_url: str | None = "/docs"
-    redoc_url: str = "/redoc"
+    docs_url: str | None = None
+    redoc_url: str = "/docs"
 
     model_config = SettingsConfigDict(env_file=".env")
 
