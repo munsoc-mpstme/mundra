@@ -264,4 +264,64 @@ def update_delegate(id: str, user: models.Delegate | models.Admin = Depends(get_
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-####################
+###############router = APIRouter()
+
+@router.post("/login", tags=["Auth"], response_model=models.Token, responses={401: {"model": models.ErrorResponse}, 500: {"model": models.ErrorResponse}})
+@limiter.limit("10/minute")
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
+    try:
+        email = form_data.username
+        password = form_data.password
+
+        # Check if the user is an admin
+        admin = database.get_admin_by_email(email)
+        if admin:
+            if not verify_password(password, admin.password):
+                raise HTTPException(status_code=401, detail="Invalid password")
+            access_token = create_access_token(data={"sub": admin.email})
+            return models.Token(access_token=access_token, token_type="bearer")
+
+        # Check if the user is a standard user
+        user = database.get_user_by_email(email)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email")
+        if not verify_password(password, user.password):
+            raise HTTPException(status_code=401, detail="Invalid password")
+
+        # Generate access token
+        access_token = create_access_token(data={"sub": user.email})
+
+        # Check if the user is already a delegate
+        delegate = database.get_delegate_by_email(user.email)
+        
+        if delegate:
+            # If delegate exists, check if they're verified
+            if not delegate.verified:
+                await mails.send_verification_email(delegate)
+                return JSONResponse(status_code=201, content={"message": "Verification email sent. Please verify your email to continue."})
+        else:
+            # If delegate doesn't exist, create a new delegate and user entry
+            uid = str(uuid4()).replace("-", "")
+            delegate = models.Delegate(
+                id=uid,
+                firstname=user.firstname,
+                lastname=user.lastname,
+                email=user.email,
+                contact=None,
+                dateofbirth=None,
+                gender=None,
+                pastmuns=None,
+                verified=False
+            )
+            database.add_delegate(delegate)
+            await mails.send_verification_email(delegate)
+            database.add_user(user)
+
+            return JSONResponse(status_code=201, content={"message": "User created successfully in main database. Please verify your email."})
+
+        # User and delegate exist, verified status confirmed or otherwise handled
+        return models.Token(access_token=access_token, token_type="bearer")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))#####
+
