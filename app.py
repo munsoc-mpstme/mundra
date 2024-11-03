@@ -265,3 +265,22 @@ def update_delegate(id: str, user: models.Delegate | models.Admin = Depends(get_
         raise HTTPException(status_code=500, detail=str(e))
 
 ####################
+
+# MUMBAIMUN QR CODES
+
+import utils
+    
+@app.get("/generate_qr/{id}", tags=["QR Code"])
+async def get_qr(id: str):
+    qr_folder = utils.qr_folder
+    if not os.path.exists(qr_folder):
+        os.makedirs(qr_folder)
+    
+    qr_image=f"{qr_folder}/{id}.jpg"
+
+    if not os.path.exists(qr_image):
+        utils.generate_qr(id)
+    try:
+        return FileResponse(qr_image)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
