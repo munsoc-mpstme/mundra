@@ -282,5 +282,54 @@ async def get_qr(id: str):
         utils.generate_qr(id)
     try:
         return FileResponse(qr_image)
+
+#REGISTER STUFF
+ @router.post("/register", tags=["Auth"], responses={400: {"model": models.ErrorResponse}, 500: {"model": models.ErrorResponse}})
+async def register(request: Request, email: str, password: str):
+    try:
+        # Check if the user already exists in the database
+        user = database.get_user_by_email(email)
+
+        if user:
+            #chk is user is delegate 
+            delegate = database.get_delegate_by_email(user.email)
+
+            # If user exists but is not a delegate, raise an exception
+            if not delegate:
+                raise HTTPException(status_code=400, detail="User exists but is not a delegate.")
+
+            # If user is a delegate but not verified, send a verification email
+            if not delegate.verified:
+                await mails.send_verification_email(delegate)
+                return JSONResponse(status_code=200, content={"message": "Verification email sent. Please verify your email to continue."})
+
+            # If delegate is found in main database, confirm registration
+            if database.check_mm_delegate(user.email):
+                return JSONResponse(status_code=200, content={"message": "User already registered and verified as a delegate."})
+
+        else:
+           #if doesnt exist create new entries
+            new_user = models.User(email=email, password=password)
+            database.add_user(new_user)
+
+            
+            uid = str(uuid4()).replace("-", "")
+            new_delegate = models.Delegate(
+                id=uid,
+                firstname=new_user.firstname,
+                lastname=new_user.lastname,
+                email=new_user.email,
+                contact=None,
+                dateofbirth=None,
+                gender=None,
+                pastmuns=None,
+                verified=False
+            )
+            database.add_delegate(new_delegate)
+            await mails.send_verification_email(new_delegate)
+
+            # Confirm that the user and delegate have been added successfully
+            return JSONResponse(status_code=201, content={"message": "User registered successfully. Please verify your email."})
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
