@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -42,6 +43,7 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -578,3 +580,44 @@ async def register(request: Request, user: models.User):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+#####################################
+# Changes related to food by Kartik #
+#####################################
+
+@app.get("/scan", tags=["Food"])
+async def scan(request: Request):
+    return templates.TemplateResponse("scan.html", {"request": request})
+
+@app.get("/food", response_class=HTMLResponse)
+async def get_food(request: Request, id: str):
+    delegate = get_delegate_by_id(id)
+    if not delegate:
+        raise HTTPException(status_code=404, detail="Delegate not found")
+
+    return templates.TemplateResponse("food.html", {"request": request, "delegate": delegate})
+
+@app.patch("/food", response_class=HTMLResponse)
+async def update_food(id: str, d1_bf: bool, d1_lunch: bool, d1_hitea: bool,
+                       d2_bf: bool, d2_lunch: bool, d2_hitea: bool,
+                       d3_bf: bool, d3_lunch: bool, d3_hitea: bool):
+    # Fetch the existing delegate
+    delegate = get_delegate_by_id(id)
+    if not delegate:
+        raise HTTPException(status_code=404, detail="Delegate not found")
+
+    # Update the delegate with new preferences
+    delegate.d1_bf = d1_bf
+    delegate.d1_lunch = d1_lunch
+    delegate.d1_hitea = d1_hitea
+    delegate.d2_bf = d2_bf
+    delegate.d2_lunch = d2_lunch
+    delegate.d2_hitea = d2_hitea
+    delegate.d3_bf = d3_bf
+    delegate.d3_lunch = d3_lunch
+    delegate.d3_hitea = d3_hitea
+
+    update_mm_delegate(id, delegate)  # Assuming this function updates the database
+
+    return {"message": "Food preferences updated successfully!"}
