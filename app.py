@@ -265,3 +265,144 @@ def update_delegate(id: str, user: models.Delegate | models.Admin = Depends(get_
         raise HTTPException(status_code=500, detail=str(e))
 
 ####################
+#REGISTER/ LOGIN STUFF
+router = APIRouter()
+
+@router.post(
+    "/login",
+    tags=["Auth"],
+    response_model=models.Token,
+    responses={
+        401: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse}
+    }
+)
+@limiter.limit("10/minute")
+async def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends()
+):
+    try:
+        email = form_data.username
+        password = form_data.password
+        admin = database.get_admin_by_email(email)
+        if admin:
+            if not verify_password(password, admin.password):
+                raise HTTPException(status_code=401, detail="Invalid password")
+            access_token = create_access_token(data={"sub": admin.email})
+            return models.Token(access_token=access_token, token_type="bearer")
+
+        user = database.get_user_by_email(email)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email")
+        if not verify_password(password, user.password):
+            raise HTTPException(status_code=401, detail="Invalid password")
+
+        access_token = create_access_token(data={"sub": user.email})
+        delegate = database.get_delegate_by_email(user.email)
+
+        if delegate:
+            if not delegate.verified:
+                await mails.send_verification_email(delegate)
+                return JSONResponse(
+                    status_code=201,
+                    content={"message": "Verification email sent. Please verify your email to continue."}
+                )
+        else:
+            uid = str(uuid4()).replace("-", "")
+            delegate = models.Delegate(
+                id=uid,
+                firstname=user.firstname,
+                lastname=user.lastname,
+                email=user.email,
+                contact=None,
+                dateofbirth=None,
+                gender=None,
+                pastmuns=None,
+                verified=False
+            )
+            database.add_delegate(delegate)
+            await mails.send_verification_email(delegate)
+            return JSONResponse(
+                status_code=201,
+                content={"message": "User registered successfully in main database. Please verify your email."}
+            )
+
+        return models.Token(access_token=access_token, token_type="bearer")
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/register",
+    tags=["Auth"],
+    responses={
+        200: {"description": "Successful operation"},
+        201: {"description": "User registered successfully"},
+        400: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse}
+    }
+)
+async def register(
+    request: Request,
+    email: str,
+    password: str,
+    firstname: str = None,
+    lastname: str = None
+):
+    try:
+        user = database.get_user_by_email(email)
+
+        if user:
+            delegate = database.get_delegate_by_email(user.email)
+
+            if not delegate:
+                raise HTTPException(status_code=400, detail="User exists but is not a delegate.")
+
+            if not delegate.verified:
+                await mails.send_verification_email(delegate)
+                return JSONResponse(
+                    status_code=200,
+                    content={"message": "Verification email sent. Please verify your email to continue."}
+                )
+
+            if database.check_mm_delegate(user.email):
+                return JSONResponse(
+                    status_code=200,
+                    content={"message": "User already registered and verified as a delegate."}
+                )
+
+        else:
+            if not firstname or not lastname:
+                raise HTTPException(status_code=400, detail="Firstname and lastname are required for registration.")
+
+            new_user = models.User(email=email, password=verify_password(password), firstname=firstname, lastname=lastname)
+            database.add_user(new_user)
+
+            uid = str(uuid4()).replace("-", "")
+            new_delegate = models.Delegate(
+                id=uid,
+                firstname=new_user.firstname,
+                lastname=new_user.lastname,
+                email=new_user.email,
+                contact=None,
+                dateofbirth=None,
+                gender=None,
+                pastmuns=None,
+                verified=False
+            )
+            database.add_delegate(new_delegate)
+            await mails.send_verification_email(new_delegate)
+
+            return JSONResponse(
+                status_code=201,
+                content={"message": "User registered successfully. Please verify your email."}
+            )
+
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
