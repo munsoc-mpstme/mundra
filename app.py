@@ -2,13 +2,15 @@ import csv
 from functools import lru_cache
 from io import StringIO
 import os
+from typing import Annotated
 import uuid
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic_core import to_json
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -332,7 +334,7 @@ async def get_delegates(token: str = "", format: str = ""):
 
                 return Response(content=csv_data, media_type="text/csv")
             return data
-        raise HTTPException(status_code=404, detail="Delegates not found")
+        raise HTTPException(status_code=404, detail="No delegates found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -468,7 +470,7 @@ def update_delegate(
 # MUMBAIMUN QR CODES
 
 
-@app.get("/generate_qr/{id}", tags=["QR Code"])
+@app.get("/qr", tags=["QR Code"])
 def get_qr(id: str):
     try:
         qr_folder = utils.qr_folder
@@ -582,32 +584,114 @@ async def register(request: Request, user: models.User):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@mm_router.get(
+    "/delegates",
+    tags=["Admin"],
+    response_model=list[models.MMDelegate],
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse},
+    },
+)
+async def get_mm_delegates(token: str = "", formart: str = ""):
+    try:
+        user = await get_current_user(token)
+        if type(user) != models.Admin:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        data = database.get_mm_delegates()
+        if data:
+            if format == "csv":
+                output = StringIO()
+                writer = csv.writer(output)
+                writer.writerow(
+                    [
+                        "id",
+                        "firstname",
+                        "lastname",
+                        "email",
+                        "contact",
+                        "dateofbirth",
+                        "gender",
+                        "pastmuns",
+                    ]
+                )
+
+                for delegate in data:
+                    past_muns_info = []
+                    for mun in delegate.pastmuns:
+                        past_muns_info.append(
+                            f"{mun.name} | {mun.committee} | {mun.delegation} | {mun.year} | {mun.award}"
+                        )
+
+                    writer.writerow(
+                        [
+                            delegate.id,
+                            delegate.firstname,
+                            delegate.lastname,
+                            delegate.email,
+                            delegate.contact,
+                            delegate.dateofbirth,
+                            delegate.gender,
+                            " ; ".join(past_muns_info),
+                        ]
+                    )
+
+                csv_data = output.getvalue()
+                output.close()
+
+                return Response(content=csv_data, media_type="text/csv")
+            return data
+        raise HTTPException(status_code=404, detail="No delegates found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+app.include_router(mm_router)
+
 #####################################
 # Changes related to food by Kartik #
 #####################################
 
+
 @app.get("/scan", tags=["Food"])
-async def scan(request: Request):
+def scan(request: Request):
     return templates.TemplateResponse("scan.html", {"request": request})
 
+
 @app.get("/food", response_class=HTMLResponse)
-async def get_food(request: Request, id: str):
-    delegate = get_delegate_by_id(id)
-    if not delegate:
-        raise HTTPException(status_code=404, detail="Delegate not found")
+def get_food(request: Request, id: str):
+    try:
+        delegate = database.get_mm_delegate_by_id(id)
+        if not delegate:
+            raise HTTPException(status_code=404, detail="Delegate not found")
 
-    return templates.TemplateResponse("food.html", {"request": request, "delegate": delegate})
+        return templates.TemplateResponse(
+            "food.html", {"request": request, "delegate": delegate}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.patch("/food", response_class=HTMLResponse)
-async def update_food(id: str, d1_bf: bool, d1_lunch: bool, d1_hitea: bool,
-                       d2_bf: bool, d2_lunch: bool, d2_hitea: bool,
-                       d3_bf: bool, d3_lunch: bool, d3_hitea: bool):
+
+@app.post("/food")
+async def update_food(
+    id: Annotated[str, Form()],
+    d1_bf: Annotated[bool, Form()] = True,
+    d1_lunch: Annotated[bool, Form()] = False,
+    d1_hitea: Annotated[bool, Form()] = False,
+    d2_bf: Annotated[bool, Form()] = False,
+    d2_lunch: Annotated[bool, Form()] = False,
+    d2_hitea: Annotated[bool, Form()] = False,
+    d3_bf: Annotated[bool, Form()] = False,
+    d3_lunch: Annotated[bool, Form()] = False,
+    d3_hitea: Annotated[bool, Form()] = False,
+):
     # Fetch the existing delegate
-    delegate = get_delegate_by_id(id)
+    delegate = database.get_mm_delegate_by_id(id)
     if not delegate:
         raise HTTPException(status_code=404, detail="Delegate not found")
 
-    # Update the delegate with new preferences
     delegate.d1_bf = d1_bf
     delegate.d1_lunch = d1_lunch
     delegate.d1_hitea = d1_hitea
@@ -618,6 +702,11 @@ async def update_food(id: str, d1_bf: bool, d1_lunch: bool, d1_hitea: bool,
     delegate.d3_lunch = d3_lunch
     delegate.d3_hitea = d3_hitea
 
-    update_mm_delegate(id, delegate)  # Assuming this function updates the database
-
-    return {"message": "Food preferences updated successfully!"}
+    try:
+        database.update_mm_delegate(delegate.id, delegate)
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Food updated successfully"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

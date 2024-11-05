@@ -1,87 +1,218 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Food</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f8f9fa;
-            color: #343a40;
-        }
+      body {
+        font-family: "Roboto", sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f8f9fa;
+        color: #343a40;
+      }
+
+      h1 {
+        text-align: center;
+        color: #007bff;
+        margin-bottom: 20px;
+      }
+
+      .container {
+        max-width: 400px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+
+      .checkbox-group {
+        margin: 15px 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      label {
+        margin: 5px 0;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+      }
+
+      input[type="checkbox"] {
+        margin-right: 10px;
+        transform: scale(1.5);
+        cursor: pointer;
+      }
+
+      button {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        padding: 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+        width: 100%;
+      }
+
+      button:hover {
+        background-color: #0056b3;
+      }
+
+      @media (max-width: 480px) {
         h1 {
-            text-align: center;
-            color: #007bff;
-            margin-bottom: 20px;
+          font-size: 24px;
         }
-        .container {
-            max-width: 400px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-        }
-        .checkbox-group {
-            margin: 15px 0;
-            display: flex;
-            flex-direction: column;
-        }
-        label {
-            margin: 5px 0;
-            display: flex;
-            align-items: center;
-            cursor: pointer;
-        }
-        input[type="checkbox"] {
-            margin-right: 10px;
-            transform: scale(1.5);
-            cursor: pointer;
-        }
+
         button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            width: 100%;
+          font-size: 18px;
         }
-        button:hover {
-            background-color: #0056b3;
-        }
-        @media (max-width: 480px) {
-            h1 {
-                font-size: 24px;
-            }
-            button {
-                font-size: 18px;
-            }
-        }
+      }
     </style>
-</head>
-<body>
+  </head>
+
+  <body>
     <div class="container">
-        <h1>Food</h1>
-        <form method="post" action="/food?id={{ delegate.id }}">
-            <div class="checkbox-group">
-                <label><input type="checkbox" name="d1_bf" value="true" {% if delegate.d1_bf %}checked{% endif %}> Day 1 Breakfast</label>
-                <label><input type="checkbox" name="d1_lunch" value="true" {% if delegate.d1_lunch %}checked{% endif %}> Day 1 Lunch</label>
-                <label><input type="checkbox" name="d1_hitea" value="true" {% if delegate.d1_hitea %}checked{% endif %}> Day 1 Hi-Tea</label>
-                <label><input type="checkbox" name="d2_bf" value="true" {% if delegate.d2_bf %}checked{% endif %}> Day 2 Breakfast</label>
-                <label><input type="checkbox" name="d2_lunch" value="true" {% if delegate.d2_lunch %}checked{% endif %}> Day 2 Lunch</label>
-                <label><input type="checkbox" name="d2_hitea" value="true" {% if delegate.d2_hitea %}checked{% endif %}> Day 2 Hi-Tea</label>
-                <label><input type="checkbox" name="d3_bf" value="true" {% if delegate.d3_bf %}checked{% endif %}> Day 3 Breakfast</label>
-                <label><input type="checkbox" name="d3_lunch" value="true" {% if delegate.d3_lunch %}checked{% endif %}> Day 3 Lunch</label>
-                <label><input type="checkbox" name="d3_hitea" value="true" {% if delegate.d3_hitea %}checked{% endif %}> Day 3 Hi-Tea</label>
-            </div>
-            <button type="submit">Update Food</button>
-        </form>
+      <h1>Food - {{ delegate.firstname }} {{ delegate.lastname }}</h1>
+      <form method="POST" action="/food">
+        <input type="hidden" name="id" value="{{ delegate.id }}" />
+        <div class="checkbox-group">
+          <label
+            ><input
+              type="checkbox"
+              name="d1_bf"
+              value="true"
+              {%
+              if
+              delegate.d1_bf
+              %}checked{%
+              endif
+              %}
+            />
+            Day 1 Breakfast</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d1_lunch"
+              value="true"
+              {%
+              if
+              delegate.d1_lunch
+              %}checked{%
+              endif
+              %}
+            />
+            Day 1 Lunch</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d1_hitea"
+              value="true"
+              {%
+              if
+              delegate.d1_hitea
+              %}checked{%
+              endif
+              %}
+            />
+            Day 1 Hi-Tea</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d2_bf"
+              value="true"
+              {%
+              if
+              delegate.d2_bf
+              %}checked{%
+              endif
+              %}
+            />
+            Day 2 Breakfast</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d2_lunch"
+              value="true"
+              {%
+              if
+              delegate.d2_lunch
+              %}checked{%
+              endif
+              %}
+            />
+            Day 2 Lunch</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d2_hitea"
+              value="true"
+              {%
+              if
+              delegate.d2_hitea
+              %}checked{%
+              endif
+              %}
+            />
+            Day 2 Hi-Tea</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d3_bf"
+              value="true"
+              {%
+              if
+              delegate.d3_bf
+              %}checked{%
+              endif
+              %}
+            />
+            Day 3 Breakfast</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d3_lunch"
+              value="true"
+              {%
+              if
+              delegate.d3_lunch
+              %}checked{%
+              endif
+              %}
+            />
+            Day 3 Lunch</label
+          >
+          <label
+            ><input
+              type="checkbox"
+              name="d3_hitea"
+              value="true"
+              {%
+              if
+              delegate.d3_hitea
+              %}checked{%
+              endif
+              %}
+            />
+            Day 3 Hi-Tea</label
+          >
+        </div>
+        <button type="submit">Update Food</button>
+      </form>
     </div>
-</body>
+  </body>
 </html>

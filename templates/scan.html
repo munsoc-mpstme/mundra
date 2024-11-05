@@ -1,103 +1,124 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QR Code Scanner</title>
     <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-        }
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-        }
-        #video {
-            width: 100%;
-            max-width: 600px;
-            border: 2px solid #007bff;
-            border-radius: 10px;
-            background: #fff;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-            margin-bottom: 20px;
-        }
-        button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            padding: 12px 20px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #0056b3;
-        }
-        input[type="text"] {
-            width: calc(100% - 30px);
-            max-width: 300px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            margin-top: 10px;
-            font-size: 16px;
-        }
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f4;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 20px;
+      }
+
+      #video {
+        width: 100%;
+        max-width: 600px;
+        border: 2px solid #007bff;
+        border-radius: 10px;
+        background: #fff;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+        margin-bottom: 20px;
+      }
+
+      button {
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 12px 20px;
+        cursor: pointer;
+        font-size: 16px;
+        margin-top: 10px;
+        transition: background-color 0.3s;
+      }
+
+      button:hover {
+        background-color: #0056b3;
+      }
+
+      input[type="text"] {
+        width: calc(100% - 30px);
+        max-width: 300px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        margin-top: 10px;
+        font-size: 16px;
+      }
     </style>
-</head>
-<body>
+  </head>
+
+  <body>
     <h1>QR Code Scanner</h1>
     <video id="video" autoplay></video>
     <button id="startButton">Start Scanning</button>
-    
+
     <div id="result">
-        <input type="text" id="text-input" placeholder="Scan or type text here" />
-        <button id="confirm-btn">Confirm</button>
+      <input type="text" id="text-input" placeholder="Scan or type text here" />
+      <button id="confirm-btn">Confirm</button>
     </div>
 
     <script>
-        const video = document.getElementById('video');
-        const startButton = document.getElementById('startButton');
-        const textInput = document.getElementById('text-input');
-        const confirmButton = document.getElementById('confirm-btn');
-        const codeReader = new ZXing.BrowserQRCodeReader();
+      // Assuming video, startButton, and textInput are already defined in your HTML
+      const video = document.getElementById("video");
+      const startButton = document.getElementById("startButton");
+      const confirmButton = document.getElementById("confirm-btn");
+      const textInput = document.getElementById("text-input");
 
-        startButton.addEventListener('click', () => {
-            // Get user media for video
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    video.srcObject = stream;
-                    video.play();
-                    // Start decoding
-                    codeReader.decodeFromVideoDevice(null, video, (result, err) => {
-                        if (result) {
-                            textInput.value = result.text; // Populate the input field with scanned text
-                            console.log(`Found QR code: ${result.text}`);
-                        }
-                        if (err && !(err instanceof ZXing.NotFoundException)) {
-                            console.error(err);
-                        }
-                    });
-                })
-                .catch(err => {
-                    console.error("Error accessing camera: ", err);
-                    alert("Could not access the camera. Please check permissions.");
-                });
-        });
+      // Initialize ZXing QR Code Reader
+      const codeReader = new ZXing.BrowserQRCodeReader();
 
-        confirmButton.addEventListener('click', () => {
-            const text = textInput.value;
-            window.location.assign(`/food?id=${text}`)
-        });
+      // Function to detect if the device is likely mobile
+      function isMobileDevice() {
+        return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      }
+
+      startButton.addEventListener("click", () => {
+        // Video constraints based on device type
+        const videoConstraints = isMobileDevice()
+          ? { facingMode: { exact: "environment" } } // Rear camera for mobile
+          : true; // Default camera for desktops/laptops
+
+        // Request user media with conditional constraints
+        navigator.mediaDevices
+          .getUserMedia({ video: videoConstraints })
+          .then((stream) => {
+            video.srcObject = stream;
+            video.play();
+
+            // Start decoding QR code from the video stream
+            codeReader.decodeFromVideoDevice(null, video, (result, err) => {
+              if (result) {
+                textInput.value = result.text; // Populate the input field with scanned text
+                console.log(`Found QR code: ${result.text}`);
+              }
+              if (err && !(err instanceof ZXing.NotFoundException)) {
+                console.error(err);
+              }
+            });
+          })
+          .catch((err) => {
+            console.error("Error accessing camera: ", err);
+            alert("Could not access the camera. Please check permissions.");
+          });
+      });
+
+      confirmButton.addEventListener("click", () => {
+        const text = textInput.value;
+        window.location.href = `/food?id=${text}`;
+      });
     </script>
-</body>
+  </body>
 </html>
