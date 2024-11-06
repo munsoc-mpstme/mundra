@@ -540,6 +540,8 @@ async def mm_register(request: Request, user: models.User):
                     contact=delegate.contact,
                     dateofbirth=delegate.dateofbirth,
                     gender=delegate.gender,
+                    pastmuns=delegate.pastmuns,
+                    verified=delegate.verified,
                 )
             )
 
