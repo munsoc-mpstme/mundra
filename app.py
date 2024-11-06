@@ -466,6 +466,7 @@ mm_router = APIRouter(prefix="/mumbaimun", tags=["Mumbai MUN"])
 @mm_router.post(
     "/register",
     tags=["Auth"],
+    status_code=201,
     responses={
         400: {"model": models.ErrorResponse},
         500: {"model": models.ErrorResponse},
