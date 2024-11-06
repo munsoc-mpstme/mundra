@@ -56,7 +56,7 @@ def init_delegates():
                 lastname TEXT NOT NULL,
                 email TEXT NOT NULL,
                 contact TEXT,
-                dateofbirth,
+                dateofbirth TEXT,
                 gender TEXT,
                 pastmuns TEXT,
                 verified BOOLEAN DEFAULT 0)"""
@@ -77,7 +77,7 @@ def init_mm_delegates():
                 lastname TEXT NOT NULL,
                 email TEXT NOT NULL,
                 contact TEXT,
-                dateofbirth,
+                dateofbirth TEXT,
                 gender TEXT,
                 pastmuns TEXT,
                 verified BOOLEAN DEFAULT 0,
