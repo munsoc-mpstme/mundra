@@ -1,7 +1,8 @@
-import models
-import sqlite3
 import os
+import sqlite3
 import zipfile
+
+import models
 
 db = os.path.join(os.path.dirname(__file__), "databases", "main.db")
 backup_db = os.path.join(os.path.dirname(__file__), "backups", "backup.db")
@@ -466,6 +467,20 @@ def get_mm_delegate_by_id(id: str) -> models.MMDelegate | None:
         row = cursor.fetchone()
         if row:
             mun_list = []
+            if row[7] != "":
+                muns = row[7].split(";")
+                for mun in muns:
+                    m = mun.split(",")
+                    if m != [""]:
+                        mun_list.append(
+                            models.MunExperience(
+                                name=m[0],
+                                committee=m[1],
+                                delegation=m[2],
+                                year=int(m[3]),
+                                award=m[4],
+                            )
+                        )
             return models.MMDelegate(
                 id=row[0],
                 firstname=row[1],
@@ -497,6 +512,21 @@ def get_mm_delegate_by_email(email: str) -> models.MMDelegate | None:
         cursor.execute("SELECT * FROM mm_delegates WHERE email = ?", (email,))
         row = cursor.fetchone()
         if row:
+            mun_list = []
+            if row[7] != "":
+                muns = row[7].split(";")
+                for mun in muns:
+                    m = mun.split(",")
+                    if m != [""]:
+                        mun_list.append(
+                            models.MunExperience(
+                                name=m[0],
+                                committee=m[1],
+                                delegation=m[2],
+                                year=int(m[3]),
+                                award=m[4],
+                            )
+                        )
             return models.MMDelegate(
                 id=row[0],
                 firstname=row[1],
@@ -505,17 +535,19 @@ def get_mm_delegate_by_email(email: str) -> models.MMDelegate | None:
                 contact=row[4],
                 dateofbirth=row[5],
                 gender=row[6],
-                country=row[7],
-                committee=row[8],
-                d1_bf=bool(row[9]),
-                d1_lunch=bool(row[9]),
-                d1_hitea=bool(row[10]),
-                d2_bf=bool(row[11]),
-                d2_lunch=bool(row[12]),
-                d2_hitea=bool(row[13]),
-                d3_bf=bool(row[14]),
-                d3_lunch=bool(row[15]),
-                d3_hitea=bool(row[16]),
+                pastmuns=mun_list,
+                verified=row[9],
+                country=row[10],
+                committee=row[11],
+                d1_bf=bool(row[12]),
+                d1_lunch=bool(row[13]),
+                d1_hitea=bool(row[14]),
+                d2_bf=bool(row[15]),
+                d2_lunch=bool(row[16]),
+                d2_hitea=bool(row[17]),
+                d3_bf=bool(row[18]),
+                d3_lunch=bool(row[19]),
+                d3_hitea=bool(row[20]),
             )
         return None
 
