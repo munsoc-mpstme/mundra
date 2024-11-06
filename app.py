@@ -571,9 +571,10 @@ async def mm_register(request: Request, user: models.User):
         500: {"model": models.ErrorResponse},
     },
 )
-async def get_mm_delegates(token: str = "", format: str = ""):
+async def get_mm_delegates(
+    user: models.Delegate | models.Admin = Depends(get_current_user), format: str = ""
+):
     try:
-        user = await get_current_user(token)
         if type(user) != models.Admin:
             raise HTTPException(status_code=403, detail="Forbidden")
 
