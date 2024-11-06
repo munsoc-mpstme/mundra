@@ -24,6 +24,7 @@ MarkupSafe==2.1.5
 mdurl==0.1.2
 orjson==3.10.4
 packaging==24.1
+pillow==11.0.0
 pydantic==2.7.4
 pydantic-settings==2.3.2
 pydantic_core==2.18.4
@@ -32,6 +33,7 @@ PyJWT==2.8.0
 python-dotenv==1.0.1
 python-multipart==0.0.9
 PyYAML==6.0.1
+qrcode==8.0
 rich==13.7.1
 shellingham==1.5.4
 slowapi==0.1.9

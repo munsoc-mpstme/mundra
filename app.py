@@ -387,37 +387,6 @@ def get_delegate_by_id(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post(
-    "/add_delegate",
-    tags=["Delegates"],
-    response_model=models.Delegate,
-    status_code=201,
-    responses={
-        409: {"model": models.ErrorResponse},
-        500: {"model": models.ErrorResponse},
-    },
-)
-def add_delegate(delegate: models.newDelegate):
-    try:
-        delegate_exists = database.get_delegate_by_email(delegate.email)
-        if delegate_exists:
-            raise HTTPException(status_code=409, detail="Delegate already exists")
-        uid = str(uuid.uuid4()).replace("-", "")
-        new_delegate = models.Delegate(
-            id=uid,
-            firstname=delegate.firstname,
-            lastname=delegate.lastname,
-            email=delegate.email,
-            contact=delegate.contact,
-            dateofbirth=delegate.dateofbirth,
-            gender=delegate.gender,
-            pastmuns=delegate.pastmuns,
-        )
-        return database.add_delegate(new_delegate)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.patch(
     "/delegates/{id}",
     tags=["Delegates"],
@@ -470,7 +439,7 @@ def update_delegate(
 # MUMBAIMUN QR CODES
 
 
-@app.get("/qr", tags=["QR Code"])
+@app.get("/qr", tags=["QR"])
 def get_qr(id: str):
     try:
         qr_folder = utils.qr_folder
@@ -491,7 +460,7 @@ def get_qr(id: str):
 
 # REGISTER STUFF
 
-mm_router = APIRouter(prefix="/mm", tags=["Mumbai MUN"])
+mm_router = APIRouter(prefix="/mumbaimun", tags=["Mumbai MUN"])
 
 
 @mm_router.post(
@@ -502,7 +471,7 @@ mm_router = APIRouter(prefix="/mm", tags=["Mumbai MUN"])
         500: {"model": models.ErrorResponse},
     },
 )
-async def register(request: Request, user: models.User):
+async def mm_register(request: Request, user: models.User):
     try:
         user.password = hash_password(user.password)
         user_exists = database.get_user_by_email(user.email)
@@ -521,7 +490,8 @@ async def register(request: Request, user: models.User):
 
             if mm_delegate:
                 raise HTTPException(
-                    status_code=409, detail="Mumbai MUN Delegate already registered!"
+                    status_code=409,
+                    detail=f"Mumbai MUN Delegate already registered! ID: {mm_delegate.id}",
                 )
 
             mm_delegate = database.add_mm_delegate(
@@ -538,7 +508,9 @@ async def register(request: Request, user: models.User):
 
             return JSONResponse(
                 status_code=201,
-                content={"message": "Mumbai MUN Delegate registered successfully!"},
+                content={
+                    "message": f"Mumbai MUN Delegate registered successfully! ID: {mm_delegate.id}"
+                },
             )
 
         else:
@@ -574,7 +546,7 @@ async def register(request: Request, user: models.User):
                 return JSONResponse(
                     status_code=201,
                     content={
-                        "message": "User created successfully. Please verify your email."
+                        "message": f"User with id {delegate.id} created successfully. Please verify your email."
                     },
                 )
             except Exception as e:
@@ -594,7 +566,7 @@ async def register(request: Request, user: models.User):
         500: {"model": models.ErrorResponse},
     },
 )
-async def get_mm_delegates(token: str = "", formart: str = ""):
+async def get_mm_delegates(token: str = "", format: str = ""):
     try:
         user = await get_current_user(token)
         if type(user) != models.Admin:
@@ -655,12 +627,12 @@ app.include_router(mm_router)
 #####################################
 
 
-@app.get("/scan", tags=["Food"])
+@app.get("/scan", tags=["QR"])
 def scan(request: Request):
     return templates.TemplateResponse("scan.html", {"request": request})
 
 
-@app.get("/food", response_class=HTMLResponse)
+@app.get("/food", tags=["Food"], response_class=HTMLResponse)
 def get_food(request: Request, id: str):
     try:
         delegate = database.get_mm_delegate_by_id(id)
@@ -674,8 +646,8 @@ def get_food(request: Request, id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/food")
-async def update_food(
+@app.post("/food", tags=["Food"], status_code=201)
+def update_food(
     id: Annotated[str, Form()],
     d1_bf: Annotated[bool, Form()] = True,
     d1_lunch: Annotated[bool, Form()] = False,
@@ -705,8 +677,28 @@ async def update_food(
     try:
         database.update_mm_delegate(delegate.id, delegate)
         return JSONResponse(
-            status_code=200,
+            status_code=201,
             content={"message": "Food updated successfully"},
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+#####################################
+# OC STUFF
+#####################################
+
+
+@app.post("/manual_verify", tags=["OC"], status_code=201)
+def manual_verify(email: str):
+    try:
+        delegate = database.get_delegate_by_email(email)
+        if not delegate:
+            raise HTTPException(status_code=404, detail="Delegate not found")
+
+        delegate.verified = True
+        database.update_delegate_by_id(delegate.id, delegate)
+
+        return JSONResponse(status_code=201, content={"message": "Email verified!"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
