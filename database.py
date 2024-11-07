@@ -167,6 +167,13 @@ def change_user_pass(email: models.EmailStr, password: str):
         connection.commit()
 
 
+def delete_user(email: models.EmailStr):
+    with sqlite3.connect(db) as connection:
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM users WHERE email = ?", (email,))
+        connection.commit()
+
+
 ####################
 # DELEGATES
 ####################

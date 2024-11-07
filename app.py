@@ -708,3 +708,21 @@ def manual_verify(email: str):
         return JSONResponse(status_code=201, content={"message": "Email verified!"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+#####################################
+# DELETE USER ACCOUNT
+#####################################
+
+
+@app.delete("/account", tags=["Auth"], status_code=200)
+def delete_user(user: models.Delegate | models.Admin = Depends(get_current_user)):
+    if type(user) != models.Delegate:
+        raise HTTPException(status_code=500, detail="You are an admin")
+    try:
+        database.delete_user(user.email)
+        return JSONResponse(
+            status_code=200, content={"message": "Account deleted successfully"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
