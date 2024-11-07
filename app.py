@@ -536,7 +536,7 @@ async def mm_register(request: Request, user: models.User):
             if mm_delegate:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Mumbai MUN Delegate already registered! ID: {mm_delegate.id}",
+                    detail=f"Mumbai MUN Delegate registered! ID: {mm_delegate.id}",
                 )
 
             mm_delegate = database.add_mm_delegate(
