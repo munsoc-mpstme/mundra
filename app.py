@@ -517,7 +517,6 @@ async def mm_register(request: Request, user: models.User):
             )
 
         else:
-
             delegate = database.get_delegate_by_email(user.email)
             if not delegate:
                 uid = str(uuid.uuid4()).replace("-", "")
@@ -531,6 +530,14 @@ async def mm_register(request: Request, user: models.User):
                 )
 
             database.add_user(user)
+
+            mm_delegate = database.get_mm_delegate_by_email(user.email)
+
+            if mm_delegate:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Mumbai MUN Delegate already registered! ID: {mm_delegate.id}",
+                )
 
             mm_delegate = database.add_mm_delegate(
                 models.MMDelegate(
