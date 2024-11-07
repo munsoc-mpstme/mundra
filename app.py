@@ -14,6 +14,7 @@ from pydantic_core import to_json
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.types import Message
 
 from auth import (
     check_verification_token,
@@ -534,9 +535,11 @@ async def mm_register(request: Request, user: models.User):
             mm_delegate = database.get_mm_delegate_by_email(user.email)
 
             if mm_delegate:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Mumbai MUN Delegate registered! ID: {mm_delegate.id}",
+                return JSONResponse(
+                    status_code=201,
+                    content={
+                        "message": f"User with id {mm_delegate.id} created successfully. Please verify your email."
+                    },
                 )
 
             mm_delegate = database.add_mm_delegate(
