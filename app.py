@@ -486,7 +486,8 @@ async def mm_register(request: Request, user: models.User):
                     status_code=400, detail="User exists but is not a delegate."
                 )
             if not delegate.verified:
-                raise HTTPException(status_code=403, detail="Email not verified")
+                delegate.verified = True
+                database.update_delegate_by_id(delegate.id, delegate)
 
             mm_delegate = database.get_mm_delegate_by_email(user.email)
 
@@ -518,6 +519,7 @@ async def mm_register(request: Request, user: models.User):
             )
 
         else:
+
             delegate = database.get_delegate_by_email(user.email)
             if not delegate:
                 uid = str(uuid.uuid4()).replace("-", "")
@@ -527,20 +529,15 @@ async def mm_register(request: Request, user: models.User):
                         firstname=user.firstname,
                         lastname=user.lastname,
                         email=user.email,
+                        verified=True,
                     )
                 )
 
             database.add_user(user)
 
-            mm_delegate = database.get_mm_delegate_by_email(user.email)
-
-            if mm_delegate:
-                return JSONResponse(
-                    status_code=201,
-                    content={
-                        "message": f"User with id {mm_delegate.id} created successfully. Please verify your email."
-                    },
-                )
+            if not delegate.verified:
+                delegate.verified = True
+                database.update_delegate_by_id(delegate.id, delegate)
 
             mm_delegate = database.add_mm_delegate(
                 models.MMDelegate(
@@ -561,7 +558,7 @@ async def mm_register(request: Request, user: models.User):
                 return JSONResponse(
                     status_code=201,
                     content={
-                        "message": f"User with id {delegate.id} created successfully. Please verify your email."
+                        "message": f"User with id {delegate.id} created successfully!"
                     },
                 )
             except Exception as e:
