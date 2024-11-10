@@ -63,19 +63,10 @@
   <body>
     <h1>QR Code Scanner</h1>
     <video id="video" autoplay></video>
-    <button id="startButton">Start Scanning</button>
-
-    <div id="result">
-      <input type="text" id="text-input" placeholder="Scan or type text here" />
-      <button id="confirm-btn">Confirm</button>
-    </div>
 
     <script>
       // Assuming video, startButton, and textInput are already defined in your HTML
       const video = document.getElementById("video");
-      const startButton = document.getElementById("startButton");
-      const confirmButton = document.getElementById("confirm-btn");
-      const textInput = document.getElementById("text-input");
 
       // Initialize ZXing QR Code Reader
       const codeReader = new ZXing.BrowserQRCodeReader();
@@ -85,40 +76,34 @@
         return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       }
 
-      startButton.addEventListener("click", () => {
-        // Video constraints based on device type
-        const videoConstraints = isMobileDevice()
-          ? { facingMode: { exact: "environment" } } // Rear camera for mobile
-          : true; // Default camera for desktops/laptops
+      // Video constraints based on device type
+      const videoConstraints = isMobileDevice()
+        ? { facingMode: { exact: "environment" } } // Rear camera for mobile
+        : true; // Default camera for desktops/laptops
 
-        // Request user media with conditional constraints
-        navigator.mediaDevices
-          .getUserMedia({ video: videoConstraints })
-          .then((stream) => {
-            video.srcObject = stream;
-            video.play();
+      // Request user media with conditional constraints
+      navigator.mediaDevices
+        .getUserMedia({ video: videoConstraints })
+        .then((stream) => {
+          video.srcObject = stream;
+          video.play();
 
-            // Start decoding QR code from the video stream
-            codeReader.decodeFromVideoDevice(null, video, (result, err) => {
-              if (result) {
-                textInput.value = result.text; // Populate the input field with scanned text
-                console.log(`Found QR code: ${result.text}`);
-              }
-              if (err && !(err instanceof ZXing.NotFoundException)) {
-                console.error(err);
-              }
-            });
-          })
-          .catch((err) => {
-            console.error("Error accessing camera: ", err);
-            alert("Could not access the camera. Please check permissions.");
+          // Start decoding QR code from the video stream
+          codeReader.decodeFromVideoDevice(null, video, (result, err) => {
+            if (result) {
+              const text = result.text;
+              window.location.href = `/food?id=${text}`;
+              console.log(`Found QR code: ${result.text}`);
+            }
+            if (err && !(err instanceof ZXing.NotFoundException)) {
+              console.error(err);
+            }
           });
-      });
-
-      confirmButton.addEventListener("click", () => {
-        const text = textInput.value;
-        window.location.href = `/food?id=${text}`;
-      });
+        })
+        .catch((err) => {
+          console.error("Error accessing camera: ", err);
+          alert("Could not access the camera. Please check permissions.");
+        });
     </script>
   </body>
 </html>
