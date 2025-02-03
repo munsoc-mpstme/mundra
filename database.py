@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import zipfile
+from datetime import datetime
 
 import models
 
@@ -23,7 +24,7 @@ def init_admins():
                 password TEXT NOT NULL)"""
             )
             connection.commit()
-            print("Database initialized successfully")
+            print("Admins table initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
 
@@ -40,7 +41,7 @@ def init_users():
                 FOREIGN KEY(email) REFERENCES delegates(email) ON UPDATE CASCADE ON DELETE CASCADE)"""
             )
             connection.commit()
-            print("Database initialized successfully")
+            print("Users table initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
 
@@ -62,7 +63,7 @@ def init_delegates():
                 verified BOOLEAN DEFAULT 0)"""
             )
             connection.commit()
-            print("Database initialized successfully")
+            print("Delegates table initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
 
@@ -95,16 +96,30 @@ def init_mm_delegates():
                 )"""
             )
             connection.commit()
-            print("Database initialized successfully")
+            print("MM Delegates table initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
 
+def init_password_reset_tokens():
+    try:
+        with sqlite3.connect(mm_db) as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                """CREATE TABLE IF NOT EXISTS password_reset_tokens
+                (reset_token TEXT PRIMARY KEY NOT NULL,
+                email TEXT NOT NULL)"""
+            )
+            connection.commit()
+            print("Reset tokens table initialized successfully")
+    except sqlite3.Error as e:
+        print("Error initializing database:", e)
 
 def init():
     init_admins()
     init_users()
     init_delegates()
     init_mm_delegates()
+    init_password_reset_tokens()
 
 
 ####################
@@ -636,3 +651,33 @@ def backup_database():
         z.write(mm_backup_db, arcname=os.path.basename(mm_backup_db))
 
     print("Both main and mm databases backed up and compressed successfully")
+
+
+################################################
+# Changes related to forget password by Kartik #
+################################################
+def get_email_from_token(token: str) -> str | None:
+    with sqlite3.connect(db) as connection:
+        cursor = connection.cursor()
+        cursor.execute("SELECT email FROM password_reset_tokens WHERE reset_token = ?", (token,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        return None
+    
+def getExpTime(token: str) -> datetime | None:
+    with sqlite3.connect(db) as connection:
+        cursor = connection.cursor()
+        cursor.execute("SELECT expiry FROM password_reset_tokens WHERE reset_token = ?", (token))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        return None
+    
+def create_reset_token(email: str, token: str):
+    with sqlite3.connect(db) as connection:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO password_reset_tokens (email, reset_token) VALUES (?, ?)", (email, token))
+        connection.commit()
+
+    return token

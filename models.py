@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
+from datetime import datetime, timedelta
 
 
 class Token(BaseModel):
@@ -66,3 +67,12 @@ class MMDelegate(Delegate):
     d3_bf: bool = False
     d3_lunch: bool = False
     d3_hitea: bool = False
+
+################################################
+# Changes related to forget password by Kartik #
+################################################
+
+class PasswordResetToken(BaseModel):
+    email: EmailStr
+    reset_token: str
+    expiry: datetime = datetime.now() + timedelta(minutes=15)

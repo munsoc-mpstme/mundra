@@ -1,4 +1,4 @@
-import jwt, bcrypt, string, secrets, os
+import jwt, bcrypt
 from datetime import datetime, timedelta, timezone
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from fastapi import Depends, HTTPException
@@ -75,8 +75,3 @@ async def check_verification_token(token: str = Depends(oauth2_scheme)) -> model
     if not delegate:
         raise credentials_exception
     return delegate
-
-def generate_password(length: int = 10) -> str:
-    characters = string.ascii_letters.replace('l', '').replace('I', '') + string.digits.replace('1', '') + '!@#$%^&*()_+=-'
-    password = ''.join(secrets.choice(characters) for _ in range(length))
-    return password

@@ -4,6 +4,7 @@ from io import StringIO
 import os
 from typing import Annotated
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
@@ -200,42 +201,15 @@ async def resend_verification_email(request: Request, email: models.EmailStr):
 @limiter.limit("1/minute")
 async def forgot_password(request: Request, email: models.EmailStr):
     try:
+        if not email:
+            raise HTTPException(status_code=404, detail="Email not provided")
         delegate = database.get_delegate_by_email(email)
         if not delegate:
             raise HTTPException(status_code=404, detail="User not found")
-        if not delegate.verified:
-            raise HTTPException(status_code=403, detail="User not verified")
-        await mails.send_password_reset_email(delegate)
-        return JSONResponse(
-            status_code=200, content={"message": "Password reset email sent!"}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.patch(
-    "/change_pass",
-    tags=["Auth"],
-    responses={
-        403: {"model": models.ErrorResponse},
-        404: {"model": models.ErrorResponse},
-        500: {"model": models.ErrorResponse},
-    },
-)
-@limiter.limit("1/minute")
-def change_password(
-    request: Request,
-    password: str,
-    delegate: models.Delegate | models.Admin = Depends(get_current_user),
-):
-    try:
-        if type(delegate) != models.Delegate:
-            raise HTTPException(status_code=403, detail="Forbidden")
-        user = database.get_user_by_email(delegate.email)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        database.change_user_pass(user.email, hash_password(password))
-        return JSONResponse(status_code=200, content={"message": "Password changed!"})
+        token = database.create_reset_token(email, str(uuid.uuid4()).replace("-", ""))
+        mails.send_password_reset_email(delegate, token)
+        
+        return JSONResponse(status_code=200, content={"message": "Change Request Sent to Email!"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -731,5 +705,60 @@ def delete_user(user: models.Delegate | models.Admin = Depends(get_current_user)
         return JSONResponse(
             status_code=200, content={"message": "Account deleted successfully"}
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+################################################
+# Changes related to change password by Kartik #
+################################################
+
+@app.get(
+    "/change_pass/{token}",
+    tags=["Auth"],
+    response_model=models.Delegate,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse},
+    },
+)
+@limiter.limit("1/minute")
+def change_pass_by_ui(request: Request, token: str):
+    try:
+        email = database.get_email_from_token(token)
+        if not email:
+            raise HTTPException(status_code=404, detail="Invalid Token")
+        delegate = database.get_delegate_by_email(email)
+        if not delegate:
+            raise HTTPException(status_code=404, detail="User not found")
+        if database.getExpTime(token) < datetime.now():
+            raise HTTPException(status_code=401, detail="Token expired")
+        return templates.TemplateResponse("change_pass.html")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post(
+    "/change_pass/{token}",
+    tags=["Auth"],
+    status_code=201,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse},
+    },
+)
+@limiter.limit("1/minute")
+def change_pass_by_token(request: Request, token: str, password: str):
+    try:
+        email = database.get_email_from_token(token)
+        if not email:
+            raise HTTPException(status_code=404, detail="Invalid Token")
+        delegate = database.get_delegate_by_email(email)
+        if not delegate:
+            raise HTTPException(status_code=404, detail="User not found")
+        if database.getExpTime(token) < datetime.now():
+            raise HTTPException(status_code=401, detail="Token expired")
+        database.change_user_pass(email, hash_password(password))
+        return JSONResponse(status_code=201, content={"message": "Password changed!"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

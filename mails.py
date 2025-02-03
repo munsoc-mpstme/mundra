@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
-from auth import create_verification_token, generate_password, hash_password, VERIFICATION_TOKEN_EXPIRE_MINUTES
+from auth import create_verification_token, hash_password, VERIFICATION_TOKEN_EXPIRE_MINUTES
 import config,database, models
 
 settings = config.get_settings()
@@ -41,16 +41,12 @@ async def send_verification_email(delegate: models.Delegate) -> None:
     fm = FastMail(conf)
     await fm.send_message(message, template_name="email_verification.html")
 
-async def send_password_reset_email(delegate: models.Delegate) -> None:
-
-    new_password = generate_password()
-
-    database.change_user_pass(delegate.email, hash_password(new_password))
-
+async def send_password_reset_email(delegate: models.Delegate, token: str) -> None:
+    link = f"{url}/change_pass/{token}"
     message = MessageSchema(
         subject="Reset your password - MUNSociety MPSTME",
         recipients=[delegate.email],
-        template_body={"logo_url": logo_url, "firstname": delegate.firstname, "pass": new_password, "support_email": support_email, "tech_email": tech_email},
+        template_body={"logo_url": logo_url, "firstname": delegate.firstname, "link": link, "support_email": support_email, "tech_email": tech_email},
         subtype=MessageType.html,
     )
     fm = FastMail(conf)
