@@ -44,60 +44,62 @@ def init_users():
     except sqlite3.Error as e:
         print("Error initializing database:", e)
 
+delegatebase = {
+    "id": "TEXT PRIMARY KEY NOT NULL",
+    "firstname": "TEXT NOT NULL",
+    "lastname": "TEXT NOT NULL", 
+    "email": "TEXT NOT NULL",
+    "contact": "TEXT",
+    "dateofbirth": "TEXT",
+    "gender": "TEXT",
+    "pastmuns": "TEXT",
+    "verified": "BOOLEAN DEFAULT 0"
+}
+
+def get_base_delegate_columns():
+    return ", ".join(f"{k} {v}" for k,v in delegatebase.items())
+
+def get_base_delegate_placeholders():
+    return ", ".join(["?" for _ in delegatebase])
 
 def init_delegates():
     try:
         with sqlite3.connect(db) as connection:
             cursor = connection.cursor()
-            cursor.execute(
-                """CREATE TABLE IF NOT EXISTS delegates
-                (id TEXT PRIMARY KEY NOT NULL,
-                firstname TEXT NOT NULL,
-                lastname TEXT NOT NULL,
-                email TEXT NOT NULL,
-                contact TEXT,
-                dateofbirth TEXT,
-                gender TEXT,
-                pastmuns TEXT,
-                verified BOOLEAN DEFAULT 0)"""
-            )
+            create_query = f"""CREATE TABLE IF NOT EXISTS delegates
+                ({get_base_delegate_columns()})"""
+            cursor.execute(create_query)
             connection.commit()
             print("Database initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
-
 
 def init_mm_delegates():
     try:
         with sqlite3.connect(mm_db) as connection:
             cursor = connection.cursor()
-            cursor.execute(
-                """CREATE TABLE IF NOT EXISTS mm_delegates(id TEXT PRIMARY KEY NOT NULL,
-                firstname TEXT NOT NULL,
-                lastname TEXT NOT NULL,
-                email TEXT NOT NULL,
-                contact TEXT,
-                dateofbirth TEXT,
-                gender TEXT,
-                pastmuns TEXT,
-                verified BOOLEAN DEFAULT 0,
-                country TEXT,
-                committee TEXT,
-                d1_bf BOOLEAN DEFAULT 1,
-                d1_lunch BOOLEAN DEFAULT 0,
-                d1_hitea BOOLEAN DEFAULT 0,
-                d2_bf BOOLEAN DEFAULT 0,
-                d2_lunch BOOLEAN DEFAULT 0,
-                d2_hitea BOOLEAN DEFAULT 0,
-                d3_bf BOOLEAN DEFAULT 0,
-                d3_lunch BOOLEAN DEFAULT 0,
-                d3_hitea BOOLEAN DEFAULT 0
-                )"""
-            )
+            mm_fields = {
+                **delegatebase,
+                "country": "TEXT",
+                "committee": "TEXT",
+                "d1_bf": "BOOLEAN DEFAULT 1",
+                "d1_lunch": "BOOLEAN DEFAULT 0",
+                "d1_hitea": "BOOLEAN DEFAULT 0",
+                "d2_bf": "BOOLEAN DEFAULT 0",
+                "d2_lunch": "BOOLEAN DEFAULT 0", 
+                "d2_hitea": "BOOLEAN DEFAULT 0",
+                "d3_bf": "BOOLEAN DEFAULT 0",
+                "d3_lunch": "BOOLEAN DEFAULT 0",
+                "d3_hitea": "BOOLEAN DEFAULT 0"
+            }
+            create_query = f"""CREATE TABLE IF NOT EXISTS mm_delegates
+                ({", ".join(f"{k} {v}" for k,v in mm_fields.items())})"""
+            cursor.execute(create_query)
             connection.commit()
             print("Database initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
+
 
 
 def init():
