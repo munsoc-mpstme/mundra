@@ -255,7 +255,7 @@
                 password: password
             };
 
-            fetch(`https://mundra.munsocietympstme.com/change_pass?password=${password}`, {
+            fetch(`/change_pass?password=${password}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
