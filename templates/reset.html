@@ -255,13 +255,12 @@
                 password: password
             };
 
-            fetch(`/reset`, {
+            fetch(`https://mundra.munsocietympstme.com/change_pass?password=${password}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
-                    'token': token
-                },
-                body: JSON.stringify(payload)
+                    'Authorization': 'Bearer ' + token
+                }
             })
             .then(response => response.json())
             .then(data => {

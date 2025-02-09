@@ -5,7 +5,7 @@ import os
 from typing import Annotated
 import uuid
 
-from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request, Query, Header, Body
+from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -752,32 +752,11 @@ def delete_user(user: models.Delegate | models.Admin = Depends(get_current_user)
     },
 )
 @limiter.limit("1/minute")
-async def reset_with_ui(request: Request, token: str = Query(...)):
+async def reset_with_ui(request: Request, token: str):
     try:
         user = await get_current_user(token)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return templates.TemplateResponse("reset.html")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.patch(
-    "/reset",
-    tags=["Auth"],
-    status_code=201,
-    responses={
-        403: {"model": models.ErrorResponse},
-        404: {"model": models.ErrorResponse},
-        500: {"model": models.ErrorResponse},
-    },
-)
-@limiter.limit("1/minute")
-def change_pass_by_token(request: Request, token: str = Header(...), password: str = Body(...)):
-    try:
-        user = get_current_user(token)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        database.change_user_pass(user.email, hash_password(password))
-        return JSONResponse(status_code=200, content={"message": "Password changed Successfully!"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
