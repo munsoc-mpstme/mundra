@@ -205,7 +205,9 @@ async def forgot_password(request: Request, email: models.EmailStr):
             raise HTTPException(status_code=404, detail="User not found")
         if not delegate.verified:
             raise HTTPException(status_code=403, detail="User not verified")
-        await mails.send_password_reset_email(delegate)
+        access_token = create_access_token(data={"sub": delegate.email})
+        link = f"{settings.url}/reset?token={access_token}"
+        await mails.send_password_reset_email(delegate, link)
         return JSONResponse(
             status_code=200, content={"message": "Password reset email sent!"}
         )
@@ -731,5 +733,30 @@ def delete_user(user: models.Delegate | models.Admin = Depends(get_current_user)
         return JSONResponse(
             status_code=200, content={"message": "Account deleted successfully"}
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+###############################################
+# Changes Regarding Password Changes By Kartik
+###############################################
+
+@app.get(
+    "/reset",
+    tags=["Auth"],
+    response_model=models.Delegate,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse},
+    },
+)
+@limiter.limit("1/minute")
+async def reset_with_ui(request: Request, token: str):
+    try:
+        user = await get_current_user(token)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return templates.TemplateResponse("reset.html")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
