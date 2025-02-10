@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MunSoc | Reset Password</title>
+    <title>MUNSociety MPSTME | Reset Password</title>
     <style>
         :root {
             --primary-color: #0F428F;
@@ -12,10 +13,22 @@
             --success-color: #28a745;
         }
 
+        * {
+            box-sizing: border-box;
+        }
+
         @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.2);
+            }
+
+            100% {
+                transform: scale(1);
+            }
         }
 
         .hearts {
@@ -29,7 +42,7 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            min-height: 100vh;
+            min-height: 100svh;
             margin: 0;
             display: flex;
             align-items: center;
@@ -150,15 +163,15 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <h1>Reset Your Password</h1>
-        
+
         <form id="change-password-form">
             <div class="form-group">
                 <label for="password">New Password</label>
-                <input type="password" id="password" name="password" 
-                       placeholder="Enter your new password" required>
+                <input type="password" id="password" name="password" placeholder="Enter your new password" required>
                 <div class="password-strength">
                     <div class="strength-meter">
                         <div id="strength-bar"></div>
@@ -167,14 +180,14 @@
                 </div>
                 <div class="error-message" id="password-error"></div>
             </div>
-            
+
             <div class="form-group">
                 <label for="confirm-password">Confirm Password</label>
-                <input type="password" id="confirm-password" name="confirm-password" 
-                       placeholder="Confirm your new password" required>
+                <input type="password" id="confirm-password" name="confirm-password"
+                    placeholder="Confirm your new password" required>
                 <div class="error-message" id="confirm-password-error"></div>
             </div>
-            
+
             <button type="submit" class="button">Update Password</button>
         </form>
         <p class="support-text">Having trouble? <a href="mailto:contact@munsocietympstme.com">Contact support</a></p>
@@ -184,12 +197,12 @@
         function checkPasswordStrength(password) {
             const strengthBar = document.getElementById('strength-bar');
             const strengthText = document.getElementById('strength-text');
-            
+
             let strength = 0;
-            if(password.length >= 8) strength += 25;
-            if(password.match(/[A-Z]/)) strength += 25;
-            if(password.match(/[0-9]/)) strength += 25;
-            if(password.match(/[^A-Za-z0-9]/)) strength += 25;
+            if (password.length >= 8) strength += 25;
+            if (password.match(/[A-Z]/)) strength += 25;
+            if (password.match(/[0-9]/)) strength += 25;
+            if (password.match(/[^A-Za-z0-9]/)) strength += 25;
 
             if (password.toLowerCase().includes('munsoc')) {
                 strengthBar.style.width = '100%';
@@ -201,15 +214,15 @@
             }
 
             strengthBar.style.width = strength + '%';
-            strengthBar.style.backgroundColor = 
+            strengthBar.style.backgroundColor =
                 strength <= 25 ? '#dc3545' :
-                strength <= 50 ? '#ffc107' :
-                strength <= 75 ? '#17a2b8' : '#28a745';
+                    strength <= 50 ? '#ffc107' :
+                        strength <= 75 ? '#17a2b8' : '#28a745';
 
-            strengthText.innerHTML = 
+            strengthText.innerHTML =
                 strength <= 25 ? 'Weak' :
-                strength <= 50 ? 'Fair' :
-                strength <= 75 ? 'Good' : 'Strong';
+                    strength <= 50 ? 'Fair' :
+                        strength <= 75 ? 'Good' : 'Strong';
             strengthText.style.color = strengthBar.style.backgroundColor;
         }
 
@@ -217,7 +230,7 @@
             checkPasswordStrength(e.target.value);
         });
 
-        document.getElementById('change-password-form').addEventListener('submit', function(event) {
+        document.getElementById('change-password-form').addEventListener('submit', function (event) {
             event.preventDefault();
 
             let password = document.getElementById('password').value;
@@ -262,19 +275,20 @@
                     'Authorization': 'Bearer ' + token
                 }
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    alert(data.message);
-                } else {
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        alert(data.message);
+                    } else {
+                        alert('An error occurred while changing your password.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
                     alert('An error occurred while changing your password.');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('An error occurred while changing your password.');
-            });
+                });
         });
     </script>
 </body>
+
 </html>
