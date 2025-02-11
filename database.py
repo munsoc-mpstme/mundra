@@ -78,8 +78,9 @@ def init_mm_delegates():
     try:
         with sqlite3.connect(mm_db) as connection:
             cursor = connection.cursor()
+            cursor.execute("PRAGMA foreign_keys = ON")
             mm_fields = {
-                **delegatebase,
+                "del_id": "TEXT PRIMARY KEY NOT NULL REFERENCES delegates(id)",
                 "country": "TEXT",
                 "committee": "TEXT",
                 "d1_bf": "BOOLEAN DEFAULT 1",
@@ -99,8 +100,6 @@ def init_mm_delegates():
             print("Database initialized successfully")
     except sqlite3.Error as e:
         print("Error initializing database:", e)
-
-
 
 def init():
     init_admins()
@@ -376,34 +375,18 @@ def verify_delegate_email(email: models.EmailStr):
 
 
 def add_mm_delegate(mm_delegate: models.MMDelegate) -> models.MMDelegate:
-    pastmuns = ""
-    for mun in mm_delegate.pastmuns:
-        pastmuns += (
-            mun.name
-            + ","
-            + mun.committee
-            + ","
-            + mun.delegation
-            + ","
-            + str(mun.year)
-            + ","
-            + mun.award
-            + ";"
-        )
+    existing_delegate = get_delegate_by_id(mm_delegate.id)
+    if not existing_delegate:
+        return None
+    
     with sqlite3.connect(mm_db) as connection:
         cursor = connection.cursor()
         cursor.execute(
-            """INSERT INTO mm_delegates(id, firstname, lastname, email, contact, dateofbirth, gender, pastmuns, verified, country, committee, d1_bf, d1_lunch, d1_hitea, d2_bf, d2_lunch, d2_hitea, d3_bf, d3_lunch, d3_hitea) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO mm_delegates(del_id, country, committee, d1_bf, d1_lunch, d1_hitea, 
+                d2_bf, d2_lunch, d2_hitea, d3_bf, d3_lunch, d3_hitea) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 mm_delegate.id,
-                mm_delegate.firstname,
-                mm_delegate.lastname,
-                mm_delegate.email,
-                mm_delegate.contact,
-                mm_delegate.dateofbirth,
-                mm_delegate.gender,
-                pastmuns,
-                mm_delegate.verified,
                 mm_delegate.country,
                 mm_delegate.committee,
                 mm_delegate.d1_bf,
@@ -428,90 +411,48 @@ def get_mm_delegates() -> list[models.MMDelegate]:
         rows = cursor.fetchall()
         delegates = []
         for row in rows:
-            mun_list = []
-            if row[7] != "":
-                muns = row[7].split(";")
-                for mun in muns:
-                    m = mun.split(",")
-                    if m != [""]:
-                        mun_list.append(
-                            models.MunExperience(
-                                name=m[0],
-                                committee=m[1],
-                                delegation=m[2],
-                                year=int(m[3]),
-                                award=m[4],
-                            )
-                        )
-            delegate = models.MMDelegate(
-                id=row[0],
-                firstname=row[1],
-                lastname=row[2],
-                email=row[3],
-                contact=row[4],
-                dateofbirth=row[5],
-                gender=row[6],
-                pastmuns=mun_list,
-                verified=row[8],
-                country=row[9],
-                committee=row[10],
-                d1_bf=bool(row[11]),
-                d1_lunch=bool(row[12]),
-                d1_hitea=bool(row[13]),
-                d2_bf=bool(row[14]),
-                d2_lunch=bool(row[15]),
-                d2_hitea=bool(row[16]),
-                d3_bf=bool(row[17]),
-                d3_lunch=bool(row[18]),
-                d3_hitea=bool(row[19]),
-            )
-            delegates.append(delegate)
+            base_delegate = get_delegate_by_id(row[0])
+            if base_delegate:
+                delegate = models.MMDelegate(
+                    **base_delegate.dict(),
+                    country=row[1],
+                    committee=row[2],
+                    d1_bf=bool(row[3]),
+                    d1_lunch=bool(row[4]),
+                    d1_hitea=bool(row[5]),
+                    d2_bf=bool(row[6]),
+                    d2_lunch=bool(row[7]),
+                    d2_hitea=bool(row[8]),
+                    d3_bf=bool(row[9]),
+                    d3_lunch=bool(row[10]),
+                    d3_hitea=bool(row[11]),
+                )
+                delegates.append(delegate)
         return delegates
 
 
 def get_mm_delegate_by_id(id: str) -> models.MMDelegate | None:
     with sqlite3.connect(mm_db) as connection:
         cursor = connection.cursor()
-        cursor.execute("SELECT * FROM mm_delegates WHERE id = ?", (id,))
+        cursor.execute("SELECT * FROM mm_delegates WHERE del_id = ?", (id,))
         row = cursor.fetchone()
         if row:
-            mun_list = []
-            if row[7] != "":
-                muns = row[7].split(";")
-                for mun in muns:
-                    m = mun.split(",")
-                    if m != [""]:
-                        mun_list.append(
-                            models.MunExperience(
-                                name=m[0],
-                                committee=m[1],
-                                delegation=m[2],
-                                year=int(m[3]),
-                                award=m[4],
-                            )
-                        )
-            return models.MMDelegate(
-                id=row[0],
-                firstname=row[1],
-                lastname=row[2],
-                email=row[3],
-                contact=row[4],
-                dateofbirth=row[5],
-                gender=row[6],
-                pastmuns=mun_list,
-                verified=row[8],
-                country=row[9],
-                committee=row[10],
-                d1_bf=bool(row[11]),
-                d1_lunch=bool(row[12]),
-                d1_hitea=bool(row[13]),
-                d2_bf=bool(row[14]),
-                d2_lunch=bool(row[15]),
-                d2_hitea=bool(row[16]),
-                d3_bf=bool(row[17]),
-                d3_lunch=bool(row[18]),
-                d3_hitea=bool(row[19]),
-            )
+            base_delegate = get_delegate_by_id(row[0])
+            if base_delegate:
+                return models.MMDelegate(
+                    **base_delegate.dict(),
+                    country=row[1],
+                    committee=row[2],
+                    d1_bf=bool(row[3]),
+                    d1_lunch=bool(row[4]),
+                    d1_hitea=bool(row[5]),
+                    d2_bf=bool(row[6]),
+                    d2_lunch=bool(row[7]),
+                    d2_hitea=bool(row[8]),
+                    d3_bf=bool(row[9]),
+                    d3_lunch=bool(row[10]),
+                    d3_hitea=bool(row[11]),
+                )
         return None
 
 
@@ -564,33 +505,22 @@ def get_mm_delegate_by_email(email: str) -> models.MMDelegate | None:
 def update_mm_delegate(id: str, mm_delegate: models.MMDelegate) -> models.MMDelegate:
     try:
         with sqlite3.connect(mm_db) as connection:
-            pastmuns = ""
-            for mun in mm_delegate.pastmuns:
-                pastmuns += (
-                    mun.name
-                    + ","
-                    + mun.committee
-                    + ","
-                    + mun.delegation
-                    + ","
-                    + str(mun.year)
-                    + ","
-                    + mun.award
-                    + ";"
-                )
-
             cursor = connection.cursor()
             cursor.execute(
-                """UPDATE mm_delegates SET firstname = ?, lastname = ?, email = ?, contact = ?, dateofbirth = ?, gender = ?, pastmuns = ?, verified = ?, country = ?, committee = ?, d1_bf = ?, d1_lunch = ?, d1_hitea = ?, d2_bf = ?, d2_lunch = ?, d2_hitea = ?, d3_bf = ?, d3_lunch = ?, d3_hitea = ? WHERE id = ?""",
+                """UPDATE mm_delegates SET 
+                country = ?, 
+                committee = ?, 
+                d1_bf = ?, 
+                d1_lunch = ?, 
+                d1_hitea = ?, 
+                d2_bf = ?, 
+                d2_lunch = ?, 
+                d2_hitea = ?, 
+                d3_bf = ?, 
+                d3_lunch = ?, 
+                d3_hitea = ? 
+                WHERE del_id = ?""",
                 (
-                    mm_delegate.firstname,
-                    mm_delegate.lastname,
-                    mm_delegate.email,
-                    mm_delegate.contact,
-                    mm_delegate.dateofbirth,
-                    mm_delegate.gender,
-                    pastmuns,
-                    mm_delegate.verified,
                     mm_delegate.country,
                     mm_delegate.committee,
                     mm_delegate.d1_bf,
@@ -615,7 +545,7 @@ def update_mm_delegate(id: str, mm_delegate: models.MMDelegate) -> models.MMDele
 def delete_mm_delegate(id: str):
     with sqlite3.connect(mm_db) as connection:
         cursor = connection.cursor()
-        cursor.execute("DELETE FROM mm_delegates WHERE id = ?", (id,))
+        cursor.execute("DELETE FROM mm_delegates WHERE del_id = ?", (id,))
         connection.commit()
 
 
