@@ -4,7 +4,9 @@ from io import StringIO
 import os
 from typing import Annotated
 import uuid
-
+import jwt, bcrypt, string, secrets, os
+from jwt import JWTError
+from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -15,6 +17,11 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.types import Message
+from database import create_refresh_tokens_table
+settings = config.get_settings()
+SECRET_KEY = settings.secret_key
+ALGORITHM = "HS256"
+VERIFICATION_TOKEN_EXPIRE_MINUTES = settings.verification_token_expire_minutes
 
 from auth import (
     check_verification_token,
@@ -53,6 +60,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 database.init()
 
+@app.on_event("startup")
+async def startup_event():
+    create_refresh_tokens_table()
 
 @app.get("/", tags=["Status"])
 def status():
@@ -213,6 +223,20 @@ async def forgot_password(request: Request, email: models.EmailStr):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/refresh")
+async def refresh_token(refresh_token: str):
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        if not payload.get("refresh"):
+            raise HTTPException(status_code=400, detail="Invalid refresh token")
+            
+        email = payload.get("sub")
+        access_token = create_access_token({"sub": email})
+        return {"access_token": access_token}
+        
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
 
 @app.patch(
