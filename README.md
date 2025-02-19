@@ -6,15 +6,14 @@
 
 | Environment | Branch | Documentation URL                  |
 | ----------- | ------ | ---------------------------------- |
-| PROD        | main   | https://mundra.nnisarg.in/docs     |
-| DEV         | dev    | https://mundra-dev.nnisarg.in/docs |
+| PROD        | main   | https://mundra.munsocietympstme.com/docs |
 
 ## Setup
 
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/nnisarggada/mundra
+git clone https://github.com/munsoc-mpstme/mundra
 cd mundra
 ```
 
