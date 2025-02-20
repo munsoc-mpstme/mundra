@@ -1,8 +1,8 @@
- 
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.DS_Store
-.git
+.env
 venv/
+.git
+.DS_Store

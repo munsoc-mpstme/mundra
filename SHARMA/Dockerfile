@@ -1,17 +1,23 @@
 
-FROM python:3.10-slim  
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=UTF-8 \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=100
 
 
-WORKDIR /app  
+WORKDIR /app
 
 
-COPY requirements.txt .  
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 
-RUN pip install --no-cache-dir -r requirements.txt  
+COPY . .
 
 
-COPY . .  
+EXPOSE 8000
 
-
-CMD ["python", "app.py"] 
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,9 +1,7 @@
-from flask import Flask
-app = Flask(__name__)
+from fastapi import FastAPI
 
-@app.route('/')
-def home():
-    return "Hello, Docker!"
+app = FastAPI()
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+@app.get("/")
+def read_root():
+    return {"message": "Hello, FastAPI in Docker!"}
