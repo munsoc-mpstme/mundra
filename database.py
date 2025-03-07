@@ -617,6 +617,30 @@ def delete_mm_delegate(id: str):
         connection.commit()
 
 
+
+####################
+# Refresh token changes by jash
+####################
+def create_refresh_tokens_table():
+    with sqlite3.connect(db) as connection:
+        cursor = connection.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                email TEXT NOT NULL,
+                token TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+def store_refresh_token(email: str, token: str):
+    with sqlite3.connect(db) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO refresh_tokens (email, token) VALUES (?, ?)",
+            (email, token)
+        )
+
+
 ####################
 # BACKUP
 ####################
