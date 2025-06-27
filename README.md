@@ -8,6 +8,9 @@
 | ----------- | ------ | ---------------------------------- |
 | PROD        | main   | https://mundra.munsocietympstme.com/docs |
 
+This backend is used by the Delego app available at
+[AppStore](https://apps.apple.com/no/app/delego-mumbai-mun-2024/id1661612842) and will be available at PlayStore soon.
+
 ## Setup
 
 1. Clone the repository:
