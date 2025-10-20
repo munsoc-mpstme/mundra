@@ -122,26 +122,24 @@ async def register(request: Request, user: models.User):
 )
 @limiter.limit("10/minute")
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
-    try:
-        email = form_data.username
-        password = form_data.password
+    email = form_data.username
+    password = form_data.password
 
-        admin = database.get_admin_by_email(email)
-        if not admin:
-            user = database.get_user_by_email(email)
-            if not user:
-                raise HTTPException(status_code=401, detail="Invalid email")
-            if not verify_password(password, user.password):
-                raise HTTPException(status_code=401, detail="Invalid password")
-            access_token = create_access_token(data={"sub": user.email})
-        else:
-            if not verify_password(password, admin.password):
-                raise HTTPException(status_code=401, detail="Invalid password")
-            access_token = create_access_token(data={"sub": admin.email})
-        return models.Token(access_token=access_token, token_type="bearer")
+    admin = database.get_admin_by_email(email)
+    if admin:
+        if not verify_password(password, admin.password):
+            raise HTTPException(status_code=401, detail="Invalid password")
+        access_token = create_access_token(data={"sub": admin.email, "type": "admin"})
+        return models.Token(access_token=access_token, token_type="bearer", user_type="admin")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    user = database.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email")
+    if not verify_password(password, user.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    access_token = create_access_token(data={"sub": user.email, "type": "user"})
+    return models.Token(access_token=access_token, token_type="bearer", user_type="user")
 
 
 @app.get(
