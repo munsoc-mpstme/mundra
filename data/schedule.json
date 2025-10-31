@@ -1,0 +1,45 @@
+{
+  "conference_days": [
+    {
+      "day_key": "Day 1",
+      "display_date": "November 7 , 2025"
+    },
+    {
+      "day_key": "Day 2",
+      "display_date": "November 8, 2025"
+    },
+    {
+      "day_key": "Day 3",
+      "display_date": "November 9, 2025"
+    }
+  ],
+  "events": [
+    {
+      "id": "1",
+      "day": "Day 1",
+      "name": "Registrationsss",
+      "location": "MPSTME bldg",
+      "time": "9:30 - 11:00AM sii",
+      "description": "Long ass description",
+      "image": "https://http.cat/images/200.jpg"
+    },
+    {
+      "id": "2",
+      "day": "Day 1",
+      "name": "Opening Ceremony",
+      "location": "Big Seminar Hall",
+      "time": "11:00 - 12:30PM",
+      "description": "...",
+      "image": "https://http.cat/images/200.jpg"
+    },
+    {
+      "id": "3",
+      "day": "Day 3",
+      "name": "Breakfast",
+      "location": "Canteen",
+      "time": "08:00 - 09:00AM",
+      "description": "...",
+      "image": "https://http.cat/images/200.jpg"
+    }
+  ]
+}

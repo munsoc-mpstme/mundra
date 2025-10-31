@@ -4,6 +4,7 @@ from io import StringIO
 import os
 from typing import Annotated
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
@@ -756,3 +757,84 @@ async def serve_reset_html(request: Request, token: str):
         return templates.TemplateResponse("reset.html", {"request": request})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+###############################################
+# App Specific changes for dynamic data
+###############################################
+
+ROOMS_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "rooms.json")
+
+@lru_cache()
+def read_rooms_data():
+    """Reads and parses the rooms data from the JSON file."""
+    try:
+        # Check if the file exists
+        if not os.path.exists(ROOMS_FILE_PATH):
+            return HTTPException(status_code=500, detail="Error reading rooms data: File does not exist")
+        
+        with open(ROOMS_FILE_PATH, "r") as f:
+            return json.load(f)
+            
+    except json.JSONDecodeError:
+        # Handle cases where the JSON file is invalid
+        print(f"Error decoding JSON from: {ROOMS_FILE_PATH}")
+        raise HTTPException(status_code=500, detail="Error reading rooms data: Invalid JSON format")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error while fetching rooms data")
+
+
+@app.get(
+    "/rooms",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_rooms():
+    """Returns the rooms data from data/rooms.json."""
+    try:
+        rooms_data = read_rooms_data()
+        return rooms_data
+        
+    except HTTPException as e:
+        # Re-raise the HTTPException raised by read_rooms_data
+        raise e
+    except Exception as e:
+        # Catch any other unexpected errors
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+    
+    
+SCHEDULE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "schedule.json")
+
+@lru_cache()
+def read_schedule_data():
+    """Reads and parses the full schedule data from the JSON file."""
+    try:
+        if not os.path.exists(SCHEDULE_FILE_PATH):
+            return {"conference_days": [], "events": []}
+        
+        with open(SCHEDULE_FILE_PATH, "r") as f:
+            data = json.load(f)
+            return {
+                "conference_days": data.get("conference_days", []),
+                "events": data.get("events", [])
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error while fetching schedule data")
+
+
+@app.get(
+    "/schedule",
+    tags=["Dynamic Data"],
+    response_model=models.FullScheduleResponse,  # <--- Use the new Pydantic model here
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_schedule():
+    """Returns the full event schedule data including day metadata."""
+    schedule_data = read_schedule_data()
+    return schedule_data

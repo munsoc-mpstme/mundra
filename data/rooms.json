@@ -1,0 +1,38 @@
+[
+  {
+    "id": "copuos_1",
+    "committee_name": "COPUOS",
+    "room_code": "CR 404",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "aippm_2",
+    "committee_name": "AIPPM",
+    "room_code": "CR 401",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "hunga_3",
+    "committee_name": "H.UNGA",
+    "room_code": "CR 403",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "ilc_4",
+    "committee_name": "ILC",
+    "room_code": "CR 607",
+    "floor": "Floor 6"
+  },
+  {
+    "id": "ipc_5",
+    "committee_name": "IPC",
+    "room_code": "CR 507",
+    "floor": "Floor 5"
+  },
+  {
+    "id": "undp_6",
+    "committee_name": "UNDP",
+    "room_code": "CR 604",
+    "floor": "Floor 6"
+  }
+]
