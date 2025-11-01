@@ -659,7 +659,7 @@ def get_food(request: Request, id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# Literally anyone in the wild can update this which is concerning, Will fix this later
 @app.post("/food", tags=["Food"], status_code=201)
 def update_food(
     id: Annotated[str, Form()],
@@ -702,7 +702,7 @@ def update_food(
 # OC STUFF
 #####################################
 
-
+# again, anyone in the wild can bypass email verification, will fix later
 @app.post("/manual_verify", tags=["OC"], status_code=201)
 def manual_verify(email: str):
     try:
@@ -829,7 +829,6 @@ def read_schedule_data():
 @app.get(
     "/schedule",
     tags=["Dynamic Data"],
-    response_model=models.FullScheduleResponse,  # <--- Use the new Pydantic model here
     responses={
         500: {"model": models.ErrorResponse},
     },
