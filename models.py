@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 class Token(BaseModel):
     access_token: str
     token_type: str
-
+    user_type: str
 
 class ErrorResponse(BaseModel):
     error: str
