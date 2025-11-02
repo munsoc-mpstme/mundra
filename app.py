@@ -3,6 +3,7 @@ from functools import lru_cache
 from io import StringIO
 import os
 from typing import Annotated
+from pathlib import Path
 import uuid
 import json
 
@@ -54,6 +55,20 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 database.init()
 
+IMAGE_DIR = Path("static")
+
+@app.get("/static/{filename}")
+def get_image(filename: str):
+    file_path = IMAGE_DIR / filename
+
+    if not file_path.exists():
+        return Response(status_code=404, content="Image not found")
+
+    # Return the file with custom Cache-Control
+    headers = {
+        "Cache-Control": "public, max-age=86400"  # cache for 1 day
+    }
+    return FileResponse(file_path, headers=headers)
 
 @app.get("/", tags=["Status"])
 def status():

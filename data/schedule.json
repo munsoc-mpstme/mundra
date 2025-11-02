@@ -21,7 +21,7 @@
       "location": "MPSTME bldg",
       "time": "9:30 - 11:00AM sii",
       "description": "Long ass description",
-      "image": "https://http.cat/images/200.jpg"
+      "image": "https://mundra.munsocietympstme.com/static/logo.jpg"
     },
     {
       "id": "2",
@@ -30,7 +30,7 @@
       "location": "Big Seminar Hall",
       "time": "11:00 - 12:30PM",
       "description": "...",
-      "image": "https://http.cat/images/200.jpg"
+      "image": "https://mundra.munsocietympstme.com/static/logo.jpg"
     },
     {
       "id": "3",
@@ -39,7 +39,7 @@
       "location": "Canteen",
       "time": "08:00 - 09:00AM",
       "description": "...",
-      "image": "https://http.cat/images/200.jpg"
+      "image": "https://mundra.munsocietympstme.com/static/logo.jpg"
     }
   ]
 }
