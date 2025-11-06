@@ -1,0 +1,171 @@
+{
+  "conference_days": [
+    {
+      "day_key": "Day 1",
+      "display_date": "November 7, 2025"
+    },
+    {
+      "day_key": "Day 2",
+      "display_date": "November 8, 2025"
+    },
+    {
+      "day_key": "Day 3",
+      "display_date": "November 9, 2025"
+    }
+  ],
+  "events": [
+    {
+      "id": "1",
+      "day": "Day 1",
+      "name": "Registration Desk",
+      "location": "MPSTME Main Gate",
+      "time": "9:00 - 10:30 AM",
+      "description": "Register as the delegate and recieve a welcome kit.",
+      "image": "https://mundra.munsocietympstme.com/static/registration.jpg"
+    },
+    {
+      "id": "2",
+      "day": "Day 1",
+      "name": "Opening Ceremony",
+      "location": "Big Auditorium",
+      "time": "10:30 AM - 12:00 PM",
+      "description": "Opening Ceremony and short speech from the OC.",
+      "image": "https://mundra.munsocietympstme.com/static/opening.jpg"
+    },
+    {
+      "id": "3",
+      "day": "Day 1",
+      "name": "Lunch",
+      "location": "Canteen",
+      "time": "12:00 PM - 2:00 PM",
+      "description": "Lunch to get started with delegating.",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "4",
+      "day": "Day 1",
+      "name": "Committee Session 1",
+      "location": "Committee Room",
+      "time": "2:00 PM - 5:00 PM",
+      "description": "MUN Commences",
+      "image": "https://mundra.munsocietympstme.com/static/mun.jpg"
+    },
+    {
+      "id": "5",
+      "day": "Day 1",
+      "name": "High Tea",
+      "location": "Canteen",
+      "time": "5:00 PM - 5:30 PM",
+      "description": "High Tea for a quick break",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "6",
+      "day": "Day 1",
+      "name": "Formal Socials",
+      "location": "Big Auditorium",
+      "time": "5:30 PM - 7:30 PM",
+      "description": "Fun Event (not worth skipping)",
+      "image": "https://mundra.munsocietympstme.com/static/formal.jpg"
+    },
+    {
+      "id": "7",
+      "day": "Day 2",
+      "name": "Breakfast",
+      "location": "Canteen",
+      "time": "8:00 - 9:00 AM",
+      "description": "Have breakfast to get started.",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "8",
+      "day": "Day 2",
+      "name": "Committee Session 2",
+      "location": "Committee Room",
+      "time": "9:00 AM - 12:30 PM",
+      "description": "MUN Session 2",
+      "image": "https://mundra.munsocietympstme.com/static/mun.jpg"
+    },
+    {
+      "id": "9",
+      "day": "Day 2",
+      "name": "Lunch",
+      "location": "Canteen",
+      "time": "12:30 PM - 2:00 PM",
+      "description": "Quick Refreshment",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "10",
+      "day": "Day 2",
+      "name": "Committee Session 3",
+      "location": "Committee Room",
+      "time": "2:00 PM - 5:30 PM",
+      "description": "MUN Session 3",
+      "image": "https://mundra.munsocietympstme.com/static/mun.jpg"
+    },
+    {
+      "id": "11",
+      "day": "Day 2",
+      "name": "High Tea",
+      "location": "Canteen",
+      "time": "5:30 PM - 6:30 PM",
+      "description": "End your day with some tasty snacks",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "12",
+      "day": "Day 3",
+      "name": "Breakfast",
+      "location": "Canteen",
+      "time": "8:00 - 9:00 AM",
+      "description": "Have breakfast to get started.",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "13",
+      "day": "Day 3",
+      "name": "Committee Session 4",
+      "location": "Committee Room",
+      "time": "9:00 AM - 12:30 PM",
+      "description": "MUN Session 4",
+      "image": "https://mundra.munsocietympstme.com/static/mun.jpg"
+    },
+    {
+      "id": "14",
+      "day": "Day 3",
+      "name": "Lunch",
+      "location": "Canteen",
+      "time": "12:30 PM - 1:30 PM",
+      "description": "Lunch to fuel up for delegating.",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "15",
+      "day": "Day 3",
+      "name": "Committee Session 5",
+      "location": "Committee Room",
+      "time": "1:30 PM - 4:30 PM",
+      "description": "Final MUN Session",
+      "image": "https://mundra.munsocietympstme.com/static/mun.jpg"
+    },
+    {
+      "id": "16",
+      "day": "Day 3",
+      "name": "High Tea",
+      "location": "Canteen",
+      "time": "4:30 PM - 5:00 PM",
+      "description": "Quick Refreshment",
+      "image": "https://mundra.munsocietympstme.com/static/canteen.jpg"
+    },
+    {
+      "id": "17",
+      "day": "Day 3",
+      "name": "Closing Ceremony",
+      "location": "Big Auditorium",
+      "time": "5:00 PM - 7:00 PM",
+      "description": "Winner announcements, Closing Speeches.",
+      "image": "https://mundra.munsocietympstme.com/static/prize.jpg"
+    }
+  ]
+}

@@ -3,7 +3,9 @@ from functools import lru_cache
 from io import StringIO
 import os
 from typing import Annotated
+from pathlib import Path
 import uuid
+import json
 
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
@@ -53,6 +55,20 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 database.init()
 
+IMAGE_DIR = Path("static")
+
+@app.get("/static/{filename}")
+def get_image(filename: str):
+    file_path = IMAGE_DIR / filename
+
+    if not file_path.exists():
+        return Response(status_code=404, content="Image not found")
+
+    # Return the file with custom Cache-Control
+    headers = {
+        "Cache-Control": "public, max-age=86400"  # cache for 1 day
+    }
+    return FileResponse(file_path, headers=headers)
 
 @app.get("/", tags=["Status"])
 def status():
@@ -122,26 +138,24 @@ async def register(request: Request, user: models.User):
 )
 @limiter.limit("10/minute")
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
-    try:
-        email = form_data.username
-        password = form_data.password
+    email = form_data.username
+    password = form_data.password
 
-        admin = database.get_admin_by_email(email)
-        if not admin:
-            user = database.get_user_by_email(email)
-            if not user:
-                raise HTTPException(status_code=401, detail="Invalid email")
-            if not verify_password(password, user.password):
-                raise HTTPException(status_code=401, detail="Invalid password")
-            access_token = create_access_token(data={"sub": user.email})
-        else:
-            if not verify_password(password, admin.password):
-                raise HTTPException(status_code=401, detail="Invalid password")
-            access_token = create_access_token(data={"sub": admin.email})
-        return models.Token(access_token=access_token, token_type="bearer")
+    admin = database.get_admin_by_email(email)
+    if admin:
+        if not verify_password(password, admin.password):
+            raise HTTPException(status_code=401, detail="Invalid password")
+        access_token = create_access_token(data={"sub": admin.email, "type": "admin"})
+        return models.Token(access_token=access_token, token_type="bearer", user_type="admin")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    user = database.get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email")
+    if not verify_password(password, user.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    access_token = create_access_token(data={"sub": user.email, "type": "user"})
+    return models.Token(access_token=access_token, token_type="bearer", user_type="user")
 
 
 @app.get(
@@ -660,7 +674,7 @@ def get_food(request: Request, id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# Literally anyone in the wild can update this which is concerning, Will fix this later
 @app.post("/food", tags=["Food"], status_code=201)
 def update_food(
     id: Annotated[str, Form()],
@@ -703,7 +717,7 @@ def update_food(
 # OC STUFF
 #####################################
 
-
+# again, anyone in the wild can bypass email verification, will fix later
 @app.post("/manual_verify", tags=["OC"], status_code=201)
 def manual_verify(email: str):
     try:
@@ -758,3 +772,83 @@ async def serve_reset_html(request: Request, token: str):
         return templates.TemplateResponse("reset.html", {"request": request})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+###############################################
+# App Specific changes for dynamic data
+###############################################
+
+ROOMS_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "rooms.json")
+
+@lru_cache()
+def read_rooms_data():
+    """Reads and parses the rooms data from the JSON file."""
+    try:
+        # Check if the file exists
+        if not os.path.exists(ROOMS_FILE_PATH):
+            return HTTPException(status_code=500, detail="Error reading rooms data: File does not exist")
+        
+        with open(ROOMS_FILE_PATH, "r") as f:
+            return json.load(f)
+            
+    except json.JSONDecodeError:
+        # Handle cases where the JSON file is invalid
+        print(f"Error decoding JSON from: {ROOMS_FILE_PATH}")
+        raise HTTPException(status_code=500, detail="Error reading rooms data: Invalid JSON format")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error while fetching rooms data")
+
+
+@app.get(
+    "/rooms",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_rooms():
+    """Returns the rooms data from data/rooms.json."""
+    try:
+        rooms_data = read_rooms_data()
+        return rooms_data
+        
+    except HTTPException as e:
+        # Re-raise the HTTPException raised by read_rooms_data
+        raise e
+    except Exception as e:
+        # Catch any other unexpected errors
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+    
+    
+SCHEDULE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "schedule.json")
+
+@lru_cache()
+def read_schedule_data():
+    """Reads and parses the full schedule data from the JSON file."""
+    try:
+        if not os.path.exists(SCHEDULE_FILE_PATH):
+            return {"conference_days": [], "events": []}
+        
+        with open(SCHEDULE_FILE_PATH, "r") as f:
+            data = json.load(f)
+            return {
+                "conference_days": data.get("conference_days", []),
+                "events": data.get("events", [])
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error while fetching schedule data")
+
+
+@app.get(
+    "/schedule",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_schedule():
+    """Returns the full event schedule data including day metadata."""
+    schedule_data = read_schedule_data()
+    return schedule_data
