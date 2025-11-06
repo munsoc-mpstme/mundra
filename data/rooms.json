@@ -1,38 +1,92 @@
 [
   {
-    "id": "copuos_1",
-    "committee_name": "COPUOS",
+    "id": "jcc_western_1",
+    "committee_name": "JCC - Western Bloc",
     "room_code": "CR 404",
     "floor": "Floor 4"
   },
   {
-    "id": "aippm_2",
-    "committee_name": "AIPPM",
+    "id": "jcc_communist_2",
+    "committee_name": "JCC - Communist Bloc",
+    "room_code": "CR 405",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "unodc_3",
+    "committee_name": "UNODC",
     "room_code": "CR 401",
     "floor": "Floor 4"
   },
   {
-    "id": "hunga_3",
-    "committee_name": "H.UNGA",
+    "id": "hls_4",
+    "committee_name": "HLS",
     "room_code": "CR 403",
     "floor": "Floor 4"
   },
   {
-    "id": "ilc_4",
-    "committee_name": "ILC",
-    "room_code": "CR 607",
-    "floor": "Floor 6"
+    "id": "unhrc_5",
+    "committee_name": "UNHRC",
+    "room_code": "CR 503",
+    "floor": "Floor 5"
   },
   {
-    "id": "ipc_5",
-    "committee_name": "IPC",
+    "id": "unctad_6",
+    "committee_name": "UNCTAD",
+    "room_code": "CR 501",
+    "floor": "Floor 5"
+  },
+  {
+    "id": "fao_7",
+    "committee_name": "FAO",
     "room_code": "CR 507",
     "floor": "Floor 5"
   },
   {
-    "id": "undp_6",
-    "committee_name": "UNDP",
-    "room_code": "CR 604",
-    "floor": "Floor 6"
+    "id": "uncsw_8",
+    "committee_name": "UNCSW",
+    "room_code": "CR 506",
+    "floor": "Floor 5"
+  },
+  {
+    "id": "unesco_9",
+    "committee_name": "UNESCO",
+    "room_code": "CR 505",
+    "floor": "Floor 5"
+  },
+  {
+    "id": "unea_10",
+    "committee_name": "UNEA",
+    "room_code": "CR 504",
+    "floor": "Floor 5"
+  },
+  {
+    "id": "unsc_11",
+    "committee_name": "UNSC",
+    "room_code": "CR 408",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "ipc_12",
+    "committee_name": "IPC",
+    "room_code": "TR 401",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "interpol_13",
+    "committee_name": "INTERPOL",
+    "room_code": "CR 502",
+    "floor": "Floor 5"
+  },
+  {
+    "id": "g20_14",
+    "committee_name": "G20",
+    "room_code": "CR 407",
+    "floor": "Floor 4"
+  },
+  {
+    "id": "specpol_15",
+    "committee_name": "SPECPOL",
+    "room_code": "CR 402",
+    "floor": "Floor 4"
   }
 ]
