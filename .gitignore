@@ -1,8 +1,30 @@
+# Environments
 env/
 venv/
-.env*
-**/__pycache__/
-**/*.db
-**/*.zip
+.venv/
+
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Runtime artifacts
+databases/*
+backups/*
 qrcodes/*
+*.db
+*.zip
+
+# Local notes - not part of the repo
+COMPREHENSIVE_README.md
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
