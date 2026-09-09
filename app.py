@@ -3,7 +3,6 @@ from functools import lru_cache
 from io import StringIO
 import os
 from typing import Annotated
-from pathlib import Path
 import uuid
 import json
 
@@ -12,11 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic_core import to_json
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from starlette.types import Message
 
 from auth import (
     check_verification_token,
@@ -55,20 +52,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 database.init()
 
-IMAGE_DIR = Path("static")
-
-@app.get("/static/{filename}")
-def get_image(filename: str):
-    file_path = IMAGE_DIR / filename
-
-    if not file_path.exists():
-        return Response(status_code=404, content="Image not found")
-
-    # Return the file with custom Cache-Control
-    headers = {
-        "Cache-Control": "public, max-age=86400"  # cache for 1 day
-    }
-    return FileResponse(file_path, headers=headers)
 
 @app.get("/", tags=["Status"])
 def status():
@@ -658,7 +641,7 @@ app.include_router(mm_router)
 
 @app.get("/scan", tags=["QR"])
 def scan(request: Request):
-    return templates.TemplateResponse("scan.html", {"request": request})
+    return templates.TemplateResponse(request, "scan.html")
 
 
 @app.get("/food", tags=["Food"], response_class=HTMLResponse)
@@ -669,7 +652,7 @@ def get_food(request: Request, id: str):
             raise HTTPException(status_code=404, detail="Delegate not found")
 
         return templates.TemplateResponse(
-            "food.html", {"request": request, "delegate": delegate}
+            request, "food.html", {"delegate": delegate}
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -769,7 +752,7 @@ async def serve_reset_html(request: Request, token: str):
         user = await get_current_user(token)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-        return templates.TemplateResponse("reset.html", {"request": request})
+        return templates.TemplateResponse(request, "reset.html")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
