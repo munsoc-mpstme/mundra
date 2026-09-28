@@ -47,19 +47,20 @@ def test_openapi_and_docs(client):
 # --- Starlette 1.x TemplateResponse migration -------------------------------
 
 
-def test_scan_template(client):
-    """Would raise TypeError under Starlette 1.x with the old argument order."""
-    res = client.get("/scan")
+def test_reset_template(client):
+    """The one remaining TemplateResponse route: would raise TypeError under Starlette
+    1.x with the old argument order. /reset needs a valid token for a verified user."""
+    import asyncio
+
+    import auth
+    from helpers import create_user
+
+    email = asyncio.run(create_user())
+    token = auth.create_access_token({"sub": email})
+    res = client.get("/reset", params={"token": token})
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
-    assert "QR Code Scanner" in res.text
-
-
-def test_food_template(client, mm_delegate):
-    res = client.get("/food", params={"id": mm_delegate.id})
-    assert res.status_code == 200
-    assert "text/html" in res.headers["content-type"]
-    assert mm_delegate.firstname in res.text
+    assert "Reset Your Password" in res.text
 
 
 # --- bcrypt 5 + auth round-trip ---------------------------------------------

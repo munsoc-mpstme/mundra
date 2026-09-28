@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     verification_token_expire_minutes: int = 120
+    access_token_expire_minutes: int = 720  # 12h: one event day (docs/adr/0003)
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
     url: str = "http://localhost:8000"

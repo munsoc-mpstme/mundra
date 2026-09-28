@@ -160,7 +160,7 @@ This backend is built with FastAPI to handle authentication, delegate management
  - **alembic/**: Database migrations. `alembic.ini` and `alembic/env.py` read the connection from `.env`.
  - **docker-compose.yml**, **Dockerfile**: The app, Postgres and the scheduled backup.
  - **mails.py**: Sends email via FastMail (for verification and password reset).
- - **templates/**: HTML templates for pages like password reset, food selection, and QR scanning.
+ - **templates/**: HTML templates (currently the password reset page).
  - **data/**: JSON content served by the app (`rooms.json`, `schedule.json`).
  - **tests/**: Smoke, database and role tests, run against a real Postgres.
  - **utils.py**: Contains helper functions, such as QR code generation.
@@ -183,40 +183,87 @@ This backend is built with FastAPI to handle authentication, delegate management
  1. `GET /hash_password`: Hashes the provided password (utility).
  2. `GET /backup`: Runs `pg_dump` and returns the dump (admin only).
  3. `GET /delegates`: Lists all delegates in JSON or CSV (admin only).
- 4. `POST /manual_verify`: Manually verify delegate email.
+ 4. `POST /manual_verify`: Manually verify a delegate's email (any OC member).
  5. `PATCH /admin/users/{email}/role`: Set a user's role (admin only, audited).
 
 ### Delegate Routes
 
- 1. `GET /delegates/me`: Returns the current delegate’s profile.
+ 1. `GET /delegates/me`: Returns the current delegate’s profile, plus their OC access
+    (`is_head`, `permissions`, `teams`).
  2. `GET /delegates/{id}`: Gets a specific delegate (admin or same delegate).
  3. `PATCH /delegates/{id}`: Updates delegate data (admin or same delegate).
- 
+
 ### Mumbai MUN Routes
 
  1. `POST /mumbaimun/register`: Register user as Mumbai MUN delegate.
  2. `GET /mumbaimun/delegates`: Returns all MM delegates in JSON or CSV (admin only).
+ 3. `GET /mumbaimun/delegates/me`: The caller's own MM details (name, food preference).
+ 4. `PATCH /mumbaimun/delegates/{id}/food_preference`: Set a delegate's diet (self, or
+    hospitality/head/admin).
 
 ### QR-Related Routes
 
- 1. `GET /qr`: Returns QR code image for a given ID (generates if not found).
- 2. `GET /scan`: Serves a page to scan QR codes.
- 3. `GET /food`: Returns a page to update meal preferences for a delegate.
- 4. `POST /food`: Submits meal preferences for a delegate.
+ 1. `GET /qr`: Returns QR code image for a given ID (generates if not found). The QR
+    encodes only the delegate id; the app displays name and preference around it.
+
+### Food Routes (docs/adr/0003)
+
+ 1. `POST /food/scans`: Record a delegate collecting a meal. The day is derived from the
+    date; a second scan of the same meal returns `duplicate` and is flagged.
+    Needs `food.manage_entitlement`.
+ 2. `GET /food/plate_count`: Live plate count for a meal today, by diet.
+ 3. `GET /food/flags`: Rejected second-scans (who tried for seconds).
+
+### OC Admin Routes (docs/adr/0003)
+
+ 1. `PATCH /events/{id}`: Set an event's start/end dates (head/admin).
+ 2. `GET /events/{id}/teams`: List an event's teams (any OC).
+ 3. `POST /events/{id}/teams`: Create a team with permissions (`team.manage_definition`).
+ 4. `PATCH /teams/{id}/permissions`: Replace a team's permissions (`team.manage_definition`).
+ 5. `GET|POST /teams/{id}/members`, `DELETE /teams/{id}/members/{email}`: Manage a team's
+    roster (that team's lead, or a head/admin). Adding an unregistered email creates an
+    invite that becomes a membership when they verify. Audited to `membership_audit`.
+ 6. `GET /events/{id}/heads`: List heads (head/admin).
+ 7. `POST /events/{id}/heads`, `DELETE /events/{id}/heads/{email}`: Grant/revoke a head
+    (admin only).
+
+### Chat & Committees (docs/adr/0003)
+
+ 1. `POST /events/{id}/committees`: Create a committee (head/admin).
+ 2. `GET /events/{id}/committees`: List committees and their session status (any user; a
+    delegate can check whether their own committee has broken for a meal).
+ 3. `PATCH /committees/{id}/status`: Set `in_session`/`adjourned` (that committee's
+    rapporteur, or head/admin).
+ 4. `GET|POST /committees/{id}/messages`: Read history / send a message. A committee's
+    channel is that committee's rapporteurs + all hospitality + heads; `kind: "status"`
+    messages carry a quick-action payload (the "we're free" / "running late" buttons).
+ 5. `WS /ws/committees/{id}/chat`: Live chat. The client sends `{"token": "<jwt>"}` as its
+    first frame, then `NewChatMessage` frames. Fan-out is in-process (single uvicorn
+    worker); Postgres holds the durable history. See `chat.py` for the swap-in point if the
+    app is ever scaled to multiple processes.
+
+## Roles, teams and permissions
+
+Beyond the `role` column (`delegate`, `oc`, `admin`), the Organizing Committee has a
+permission model: teams carry named permissions as data, memberships grant a person a
+team's permissions for an event, and heads hold everything. See
+`docs/adr/0003-oc-teams-permissions-and-memberships.md`.
 
 ## Authentication & Security
- - Uses JWT with a secret key.
+ - Uses JWT with a secret key. Login tokens expire after 12 hours (`ACCESS_TOKEN_EXPIRE_MINUTES`).
  - Passwords are hashed with bcrypt.
  - Many routes are protected by Depends(get_current_user) to verify tokens.
- - Every user has a role (`delegate`, `oc` or `admin`). It is read from the database on
-   each request, not from the token, so a demotion applies immediately.
- - Admin endpoints use `Depends(require_admin)`.
+ - Every user has a role (`delegate`, `oc` or `admin`). It, and their OC permissions, are
+   read from the database on each request, not from the token, so a demotion or a lapsed
+   membership applies immediately.
+ - Admin endpoints use `Depends(require_admin)`; OC feature routes use
+   `Depends(require_permission(...))`.
 
 ## Database Interactions
  - PostgreSQL 16 with async SQLAlchemy 2.0 (asyncpg); the schema is managed by Alembic.
  - database.py has async functions to add, get, update, and delete user/delegate data.
  - A Mumbai MUN delegate is a delegate plus a row in `mm_delegates` (country, committee,
-   meals), joined on the delegate id.
+   food preference), joined on the delegate id. Meals collected are rows in `meal_scans`.
  - Past MUN experience is stored one row per entry in `mun_experiences`.
  - Backups are `pg_dump` files (see Backups above).
 
