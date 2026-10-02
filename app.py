@@ -28,8 +28,8 @@ from slowapi.util import get_remote_address
 
 from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
-    check_verification_token,
     create_access_token,
+    generate_verification_code,
     get_current_user,
     hash_password,
     require_admin,
@@ -48,7 +48,7 @@ import models
 import permissions
 import utils
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 ####################
 
@@ -118,12 +118,13 @@ async def register(request: Request, user: models.User):
                     firstname=user.firstname,
                     lastname=user.lastname,
                     email=user.email,
+                    backup_email=user.backup_email,
                 )
             )
         await database.add_user(user)
 
         try:
-            await mails.send_verification_email(delegate)
+            await send_verification_code(delegate)
             return JSONResponse(
                 status_code=201,
                 content={
@@ -166,24 +167,45 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     return models.Token(access_token=access_token, token_type="bearer", user_type=user_type)
 
 
-@app.get(
+async def send_verification_code(delegate: models.Delegate) -> None:
+    """Generate a fresh 6-digit code, store it, and email it to the delegate (and their
+    backup email, if set). Used by register, mumbaimun/register and resend."""
+    code = generate_verification_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.verification_code_expire_minutes
+    )
+    await database.set_verification_code(delegate.email, code, expires_at)
+    await mails.send_verification_email(delegate, code)
+
+
+@app.post(
     "/verify_email",
     tags=["Auth"],
     status_code=200,
-    responses={500: {"model": models.ErrorResponse}},
+    responses={
+        400: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        429: {"model": models.ErrorResponse},
+    },
 )
 @limiter.limit("10/minute")
-async def verify_email(request: Request, token: str):
-    try:
-        delegate = await check_verification_token(token)
-        if type(delegate) != models.Delegate:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        await database.verify_delegate_email(delegate.email)
+async def verify_email(request: Request, body: models.VerifyEmail):
+    """Verify an email with the 6-digit code that was sent to it."""
+    status = await database.check_verification_code(
+        body.email, body.code, settings.verification_code_max_attempts
+    )
+    if status == "ok":
+        await database.verify_delegate_email(body.email)
         # A rostered OC member becomes a team member the moment they finish signing up.
-        await database.apply_pending_invites(delegate.email)
+        await database.apply_pending_invites(body.email)
         return JSONResponse(status_code=200, content={"message": "Email verified!"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if status == "none":
+        raise HTTPException(status_code=404, detail="No verification pending for this email")
+    if status == "expired":
+        raise HTTPException(status_code=400, detail="Code expired, request a new one")
+    if status == "too_many":
+        raise HTTPException(status_code=429, detail="Too many attempts, request a new code")
+    raise HTTPException(status_code=400, detail="Invalid code")
 
 
 @app.get(
@@ -203,10 +225,12 @@ async def resend_verification_email(request: Request, email: models.EmailStr):
             raise HTTPException(status_code=404, detail="Delegate not found")
         if delegate.verified:
             raise HTTPException(status_code=409, detail="Email already verified")
-        await mails.send_verification_email(delegate)
+        await send_verification_code(delegate)
         return JSONResponse(
-            status_code=200, content={"message": "Verification email sent!"}
+            status_code=200, content={"message": "Verification code sent!"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -452,6 +476,7 @@ async def update_delegate(
     user: models.AuthUser = Depends(get_current_user),
     firstname: str = "",
     lastname: str = "",
+    backup_email: str = "",
     contact: str = "",
     dateofbirth: str = "",
     gender: str = "",
@@ -468,6 +493,8 @@ async def update_delegate(
             data.firstname = firstname
         if lastname != "":
             data.lastname = lastname
+        if backup_email != "":
+            data.backup_email = backup_email
         if contact != "":
             data.contact = contact
         if dateofbirth != "":
@@ -577,6 +604,7 @@ async def mm_register(request: Request, user: models.User):
                         firstname=user.firstname,
                         lastname=user.lastname,
                         email=user.email,
+                        backup_email=user.backup_email,
                         verified=True,
                     )
                 )
@@ -602,7 +630,7 @@ async def mm_register(request: Request, user: models.User):
             )
 
             try:
-                await mails.send_verification_email(delegate)
+                await send_verification_code(delegate)
                 return JSONResponse(
                     status_code=201,
                     content={

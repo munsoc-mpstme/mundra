@@ -81,6 +81,8 @@ class DelegateRow(Base):
     firstname: Mapped[str]
     lastname: Mapped[str]
     email: Mapped[str] = mapped_column(unique=True)
+    # Optional secondary email; verification and reset mails are also sent here.
+    backup_email: Mapped[str] = mapped_column(server_default="")
     contact: Mapped[str] = mapped_column(server_default="")
     dateofbirth: Mapped[str] = mapped_column(server_default="")
     gender: Mapped[str] = mapped_column(server_default="")
@@ -114,6 +116,23 @@ class UserRow(Base):
     )
     password: Mapped[str]
     role: Mapped[str] = mapped_column(server_default="delegate")
+    created_at: Mapped[datetime] = _created_at()
+
+
+class EmailVerificationRow(Base):
+    """A pending 6-digit email verification code: one per email, replaced on resend and
+    deleted once used. Short-lived and attempt-capped (see config), so the plain code is
+    stored directly rather than hashed."""
+
+    __tablename__ = "email_verifications"
+
+    email: Mapped[str] = mapped_column(
+        ForeignKey("delegates.email", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    code: Mapped[str]
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(server_default=text("0"))
     created_at: Mapped[datetime] = _created_at()
 
 

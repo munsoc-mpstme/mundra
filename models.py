@@ -27,6 +27,7 @@ class newDelegate(BaseModel):
     firstname: str
     lastname: str
     email: EmailStr
+    backup_email: str = ""
     contact: str = ""
     dateofbirth: str = ""
     gender: str = ""
@@ -46,6 +47,11 @@ class AuthUser(Delegate):
 
 class RoleChange(BaseModel):
     role: Role
+
+
+class VerifyEmail(BaseModel):
+    email: EmailStr
+    code: str
 
 
 # ORGANIZING COMMITTEE (docs/adr/0003)
@@ -166,6 +172,7 @@ class User(BaseModel):
     firstname: str
     lastname: str
     email: EmailStr
+    backup_email: str = ""
     password: str
 
     @field_validator("password")

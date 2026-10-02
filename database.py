@@ -5,6 +5,7 @@ returns Pydantic models, never ORM rows."""
 import argparse
 import asyncio
 import os
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select, update
@@ -45,6 +46,7 @@ def _delegate_fields(row: db.DelegateRow) -> dict:
         firstname=row.firstname,
         lastname=row.lastname,
         email=row.email,
+        backup_email=row.backup_email,
         contact=row.contact,
         dateofbirth=row.dateofbirth,
         gender=row.gender,
@@ -82,6 +84,7 @@ def _apply_delegate(row: db.DelegateRow, delegate: models.Delegate) -> None:
     row.firstname = delegate.firstname
     row.lastname = delegate.lastname
     row.email = delegate.email
+    row.backup_email = delegate.backup_email
     row.contact = delegate.contact
     row.dateofbirth = delegate.dateofbirth
     row.gender = delegate.gender
@@ -242,6 +245,7 @@ async def add_delegate(delegate: models.Delegate) -> models.Delegate:
         firstname=delegate.firstname,
         lastname=delegate.lastname,
         email=delegate.email,
+        backup_email=delegate.backup_email,
         contact=delegate.contact,
         dateofbirth=delegate.dateofbirth,
         gender=delegate.gender,
@@ -297,6 +301,45 @@ async def verify_delegate_email(email: models.EmailStr) -> None:
         await session.execute(
             update(db.DelegateRow).where(db.DelegateRow.email == email).values(verified=True)
         )
+
+
+####################
+# EMAIL VERIFICATION CODES
+####################
+
+
+async def set_verification_code(email: str, code: str, expires_at: datetime) -> None:
+    """Store (or replace) the pending 6-digit code for an email, resetting attempts."""
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.EmailVerificationRow, email)
+        if row is None:
+            session.add(
+                db.EmailVerificationRow(email=email, code=code, expires_at=expires_at)
+            )
+        else:
+            row.code = code
+            row.expires_at = expires_at
+            row.attempts = 0
+
+
+async def check_verification_code(email: str, code: str, max_attempts: int) -> str:
+    """Check a submitted code. Returns one of: 'ok' (and consumes the code), 'invalid'
+    (wrong code, attempt counted), 'expired', 'too_many', or 'none' (no code pending)."""
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.EmailVerificationRow, email, with_for_update=True)
+        if row is None:
+            return "none"
+        if row.expires_at <= now:
+            await session.delete(row)
+            return "expired"
+        if row.attempts >= max_attempts:
+            return "too_many"
+        if secrets.compare_digest(row.code, code):
+            await session.delete(row)
+            return "ok"
+        row.attempts += 1
+        return "invalid"
 
 
 ####################

@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     postgres_db: str = "mundra"
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    verification_token_expire_minutes: int = 120
+    verification_code_expire_minutes: int = 15
+    verification_code_max_attempts: int = 5
     access_token_expire_minutes: int = 720  # 12h: one event day (docs/adr/0003)
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
@@ -22,6 +23,9 @@ class Settings(BaseSettings):
     # Email is sent through Brevo's SMTP relay. MAIL_USERNAME is the Brevo SMTP login
     # (e.g. 8xxxxxx@smtp-brevo.com), MAIL_PASSWORD is a Brevo SMTP key (not the account
     # password), and MAIL_FROM must be a sender/domain verified in Brevo.
+    # Brevo HTTP API key (xkeysib-...). When set, email is sent via Brevo's HTTPS API
+    # instead of SMTP. Required on hosts that block outbound SMTP ports, such as Render.
+    brevo_api_key: str = ""
     mail_username: str = "technology@munsocietympstme.com"
     mail_password: str = ""
     mail_from: str = "technology@munsocietympstme.com"

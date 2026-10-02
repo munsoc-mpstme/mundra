@@ -9,8 +9,8 @@ settings = config.get_settings()
 
 SECRET_KEY = settings.secret_key
 ALGORITHM = "HS256"
-VERIFICATION_TOKEN_EXPIRE_MINUTES = settings.verification_token_expire_minutes
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
+VERIFICATION_CODE_EXPIRE_MINUTES = settings.verification_code_expire_minutes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
@@ -109,13 +109,6 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def create_verification_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=VERIFICATION_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
 def hash_password(password: str) -> str:
     salt = bcrypt.gensalt()
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
@@ -124,25 +117,9 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
-async def check_verification_token(token: str = Depends(oauth2_scheme)) -> models.Delegate:
-    credentials_exception = HTTPException(
-        status_code=403,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-    except ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Verification token expired")
-    except InvalidTokenError:
-        raise credentials_exception
-    delegate = await database.get_delegate_by_email(email)
-    if not delegate:
-        raise credentials_exception
-    return delegate
+def generate_verification_code() -> str:
+    """A 6-digit numeric email verification code, zero-padded (e.g. '004218')."""
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 def generate_password(length: int = 10) -> str:
     characters = string.ascii_letters.replace('l', '').replace('I', '') + string.digits.replace('1', '') + '!@#$%^&*()_+=-'
