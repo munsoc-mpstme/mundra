@@ -8,8 +8,17 @@ from typing import Annotated
 import uuid
 import json
 
-from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, HTMLResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Form,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,19 +27,28 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
     check_verification_token,
     create_access_token,
     get_current_user,
     hash_password,
     require_admin,
+    require_any_oc,
+    require_head,
+    require_permission,
     verify_password,
 )
+from sqlalchemy.exc import IntegrityError
+import chat
 import config
 import database
 import db
 import mails
 import models
+import permissions
 import utils
+
+from datetime import timedelta
 
 ####################
 
@@ -141,7 +159,10 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
 
     # user_type keeps the two values the app already understands; "oc" reports as "user".
     user_type = "admin" if await database.get_role(user.email) == "admin" else "user"
-    access_token = create_access_token(data={"sub": user.email, "type": user_type})
+    access_token = create_access_token(
+        data={"sub": user.email, "type": user_type},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
     return models.Token(access_token=access_token, token_type="bearer", user_type=user_type)
 
 
@@ -158,6 +179,8 @@ async def verify_email(request: Request, token: str):
         if type(delegate) != models.Delegate:
             raise HTTPException(status_code=401, detail="Invalid token")
         await database.verify_delegate_email(delegate.email)
+        # A rostered OC member becomes a team member the moment they finish signing up.
+        await database.apply_pending_invites(delegate.email)
         return JSONResponse(status_code=200, content={"message": "Email verified!"})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -373,11 +396,19 @@ async def get_delegates(token: str = "", format: str = ""):
 @app.get(
     "/delegates/me",
     tags=["Delegates"],
-    response_model=models.Delegate,
+    response_model=models.Me,
     responses={500: {"model": models.ErrorResponse}},
 )
-def get_current_delegate(user: models.AuthUser = Depends(get_current_user)):
-    return user
+async def get_current_delegate(user: models.AuthUser = Depends(get_current_user)):
+    # is_head, permissions and teams are additive over the old Delegate response, so an
+    # app install that does not read them keeps working (ADR 0003).
+    is_head, perms, memberships = await database.get_effective_access(user.email)
+    return models.Me(
+        **user.model_dump(),
+        is_head=is_head,
+        permissions=sorted(perms),
+        teams=memberships,
+    )
 
 
 @app.get(
@@ -650,74 +681,502 @@ async def get_mm_delegates(
 app.include_router(mm_router)
 
 #####################################
-# Changes related to food by Kartik #
+# FOOD: preference and meal scanning (docs/adr/0003)
+#####################################
+
+# Whoever runs the food counter: scans, plate counts and the flagged list.
+require_food = require_permission(permissions.FOOD_MANAGE_ENTITLEMENT)
+
+
+@app.get(
+    "/mumbaimun/delegates/me",
+    tags=["Food"],
+    response_model=models.MMDelegate,
+    responses={404: {"model": models.ErrorResponse}},
+)
+async def get_my_mm_delegate(user: models.AuthUser = Depends(get_current_user)):
+    """The caller's own Mumbai MUN details (name, preference), for the QR screen."""
+    mm = await database.get_mm_delegate_by_id(user.id)
+    if not mm:
+        raise HTTPException(status_code=404, detail="Not registered for Mumbai MUN")
+    return mm
+
+
+@app.patch(
+    "/mumbaimun/delegates/{id}/food_preference",
+    tags=["Food"],
+    response_model=models.MMDelegate,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+    },
+)
+async def set_food_preference(
+    id: str,
+    change: models.FoodPreferenceChange,
+    user: models.AuthUser = Depends(get_current_user),
+):
+    """A delegate sets their own diet, or hospitality (food.manage_entitlement) overrides
+    it on the day. A head or admin may also set it."""
+    if user.id != id and user.role != "admin":
+        is_head, perms, _ = await database.get_effective_access(user.email)
+        if not is_head and permissions.FOOD_MANAGE_ENTITLEMENT not in perms:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    updated = await database.set_food_preference(id, change)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Not a Mumbai MUN delegate")
+    return updated
+
+
+@app.post(
+    "/food/scans",
+    tags=["Food"],
+    response_model=models.ScanResult,
+    responses={
+        400: {"model": models.ErrorResponse},
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+    },
+)
+async def scan_meal(
+    delegate_id: Annotated[str, Form()],
+    meal: Annotated[models.Meal, Form()],
+    user: models.AuthUser = Depends(require_food),
+):
+    """Record a delegate collecting a meal. The day is derived from today's date against
+    the event, so the operator only picks the meal. Returns `served`, or `duplicate` (with
+    a 200) when they already collected this meal, which is logged to the flagged list."""
+    try:
+        event_id, day = await database.resolve_current_event_day()
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        return await database.record_meal_scan(
+            event_id=event_id, day=day, meal=meal, delegate_id=delegate_id, scanned_by=user.email
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get(
+    "/food/plate_count",
+    tags=["Food"],
+    response_model=models.MealCount,
+    responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
+)
+async def plate_count(meal: models.Meal, user: models.AuthUser = Depends(require_food)):
+    """The live count of plates served for a meal today, broken down by diet."""
+    try:
+        event_id, day = await database.resolve_current_event_day()
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await database.get_plate_count(event_id, day, meal)
+
+
+@app.get(
+    "/food/flags",
+    tags=["Food"],
+    response_model=list[models.FlaggedScan],
+    responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
+)
+async def flagged_scans(user: models.AuthUser = Depends(require_food)):
+    """Every rejected second-scan for the running event: who tried for seconds."""
+    try:
+        event_id, _ = await database.resolve_current_event_day()
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await database.get_flagged_scans(event_id)
+
+
+#####################################
+# OC ADMINISTRATION: events, teams, rosters, heads (docs/adr/0003)
+#####################################
+
+require_team_admin = require_permission(permissions.TEAM_MANAGE_DEFINITION)
+
+
+async def _authorize_roster(user: models.AuthUser, team_id: int) -> None:
+    """Roster edits: the team's own lead, or a head/admin. Anyone else is forbidden."""
+    if user.role == "admin":
+        return
+    is_head, _, _ = await database.get_effective_access(user.email)
+    if is_head or await database.is_team_lead(user.email, team_id):
+        return
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.patch(
+    "/events/{event_id}",
+    tags=["OC Admin"],
+    response_model=models.Event,
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def set_event_dates(
+    event_id: int,
+    dates: models.EventDates,
+    user: models.AuthUser = Depends(require_head),
+):
+    """Set an event's start and end dates, which meal scanning derives the day from."""
+    event = await database.set_event_dates(event_id, dates)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+
+@app.get(
+    "/events/{event_id}/teams",
+    tags=["OC Admin"],
+    response_model=list[models.Team],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_teams(event_id: int, user: models.AuthUser = Depends(require_any_oc)):
+    return await database.list_teams(event_id)
+
+
+@app.post(
+    "/events/{event_id}/teams",
+    tags=["OC Admin"],
+    status_code=201,
+    response_model=models.Team,
+    responses={
+        403: {"model": models.ErrorResponse},
+        409: {"model": models.ErrorResponse},
+        422: {"model": models.ErrorResponse},
+    },
+)
+async def create_team(
+    event_id: int,
+    new_team: models.NewTeam,
+    user: models.AuthUser = Depends(require_team_admin),
+):
+    try:
+        return await database.create_team(event_id, new_team)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="A team with that name already exists")
+
+
+@app.patch(
+    "/teams/{team_id}/permissions",
+    tags=["OC Admin"],
+    response_model=models.Team,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        422: {"model": models.ErrorResponse},
+    },
+)
+async def set_team_permissions(
+    team_id: int,
+    change: models.TeamPermissionsChange,
+    user: models.AuthUser = Depends(require_team_admin),
+):
+    try:
+        team = await database.set_team_permissions(team_id, change)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team
+
+
+@app.get(
+    "/teams/{team_id}/members",
+    tags=["OC Admin"],
+    response_model=list[models.RosterEntry],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_team_members(
+    team_id: int, user: models.AuthUser = Depends(get_current_user)
+):
+    await _authorize_roster(user, team_id)
+    return await database.list_team_members(team_id)
+
+
+@app.post(
+    "/teams/{team_id}/members",
+    tags=["OC Admin"],
+    status_code=201,
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def add_team_member(
+    team_id: int,
+    add: models.RosterAdd,
+    user: models.AuthUser = Depends(get_current_user),
+):
+    """Add someone to a team's roster. If they already have an account they become a
+    member now; otherwise they are invited and join automatically when they verify."""
+    await _authorize_roster(user, team_id)
+    try:
+        status = await database.add_to_roster(user.email, team_id, add)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"email": add.email, "status": status}
+
+
+@app.delete(
+    "/teams/{team_id}/members/{email}",
+    tags=["OC Admin"],
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def remove_team_member(
+    team_id: int,
+    email: models.EmailStr,
+    user: models.AuthUser = Depends(get_current_user),
+):
+    await _authorize_roster(user, team_id)
+    try:
+        removed = await database.remove_from_roster(user.email, team_id, email)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not removed:
+        raise HTTPException(status_code=404, detail="Not on this team's roster")
+    return {"email": email, "status": "removed"}
+
+
+@app.get(
+    "/events/{event_id}/heads",
+    tags=["OC Admin"],
+    response_model=list[str],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_heads(event_id: int, user: models.AuthUser = Depends(require_head)):
+    return await database.list_heads(event_id)
+
+
+@app.post(
+    "/events/{event_id}/heads",
+    tags=["OC Admin"],
+    status_code=201,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        409: {"model": models.ErrorResponse},
+    },
+)
+async def add_head(
+    event_id: int,
+    head: models.HeadAdd,
+    admin: models.AuthUser = Depends(require_admin),
+):
+    """Only an admin grants the head role (docs/adr/0003)."""
+    try:
+        added = await database.add_head(admin.email, event_id, head.email)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not added:
+        raise HTTPException(status_code=409, detail="Already a head")
+    return {"email": head.email, "status": "head"}
+
+
+@app.delete(
+    "/events/{event_id}/heads/{email}",
+    tags=["OC Admin"],
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def remove_head(
+    event_id: int,
+    email: models.EmailStr,
+    admin: models.AuthUser = Depends(require_admin),
+):
+    if not await database.remove_head(event_id, email):
+        raise HTTPException(status_code=404, detail="Not a head")
+    return {"email": email, "status": "removed"}
+
+
+#####################################
+# CHAT: committees, status and the hospitality<->rapporteur channel (docs/adr/0003)
 #####################################
 
 
-@app.get("/scan", tags=["QR"])
-def scan(request: Request):
-    return templates.TemplateResponse(request, "scan.html")
+async def _committee_or_404(committee_id: int) -> models.Committee:
+    committee = await database.get_committee(committee_id)
+    if not committee:
+        raise HTTPException(status_code=404, detail="Committee not found")
+    return committee
 
 
-@app.get("/food", tags=["Food"], response_class=HTMLResponse)
-async def get_food(request: Request, id: str):
-    try:
-        delegate = await database.get_mm_delegate_by_id(id)
-        if not delegate:
-            raise HTTPException(status_code=404, detail="Delegate not found")
+async def _committee_access(
+    user: models.AuthUser, committee: models.Committee, permission: str
+) -> bool:
+    """Whether the user may use a committee-scoped permission on this committee: an admin
+    or head always may; a rapporteur only on their own committee; hospitality on all."""
+    if user.role == "admin":
+        return True
+    is_head, _, memberships = await database.get_effective_access(user.email)
+    return permissions.can_act_on_committee(
+        is_head, memberships, permission, committee.name
+    )
 
-        return templates.TemplateResponse(
-            request, "food.html", {"delegate": delegate}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-# Literally anyone in the wild can update this which is concerning, Will fix this later
-@app.post("/food", tags=["Food"], status_code=201)
-async def update_food(
-    id: Annotated[str, Form()],
-    d1_bf: Annotated[bool, Form()] = True,
-    d1_lunch: Annotated[bool, Form()] = False,
-    d1_hitea: Annotated[bool, Form()] = False,
-    d2_bf: Annotated[bool, Form()] = False,
-    d2_lunch: Annotated[bool, Form()] = False,
-    d2_hitea: Annotated[bool, Form()] = False,
-    d3_bf: Annotated[bool, Form()] = False,
-    d3_lunch: Annotated[bool, Form()] = False,
-    d3_hitea: Annotated[bool, Form()] = False,
+@app.post(
+    "/events/{event_id}/committees",
+    tags=["Chat"],
+    status_code=201,
+    response_model=models.Committee,
+    responses={
+        403: {"model": models.ErrorResponse},
+        409: {"model": models.ErrorResponse},
+        422: {"model": models.ErrorResponse},
+    },
+)
+async def create_committee(
+    event_id: int,
+    new: models.NewCommittee,
+    user: models.AuthUser = Depends(require_head),
 ):
-    # Fetch the existing delegate
-    delegate = await database.get_mm_delegate_by_id(id)
-    if not delegate:
-        raise HTTPException(status_code=404, detail="Delegate not found")
-
-    delegate.d1_bf = d1_bf
-    delegate.d1_lunch = d1_lunch
-    delegate.d1_hitea = d1_hitea
-    delegate.d2_bf = d2_bf
-    delegate.d2_lunch = d2_lunch
-    delegate.d2_hitea = d2_hitea
-    delegate.d3_bf = d3_bf
-    delegate.d3_lunch = d3_lunch
-    delegate.d3_hitea = d3_hitea
-
     try:
-        await database.update_mm_delegate(delegate.id, delegate)
-        return JSONResponse(
-            status_code=201,
-            content={"message": "Food updated successfully"},
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return await database.create_committee(event_id, new)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="A committee with that name already exists")
+
+
+@app.get(
+    "/events/{event_id}/committees",
+    tags=["Chat"],
+    response_model=list[models.Committee],
+)
+async def list_committees(event_id: int, user: models.AuthUser = Depends(get_current_user)):
+    """Any authenticated user can read committee statuses, including a delegate checking
+    whether their own committee has broken for a meal."""
+    return await database.list_committees(event_id)
+
+
+@app.patch(
+    "/committees/{committee_id}/status",
+    tags=["Chat"],
+    response_model=models.Committee,
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def set_committee_status(
+    committee_id: int,
+    change: models.CommitteeStatusChange,
+    user: models.AuthUser = Depends(get_current_user),
+):
+    committee = await _committee_or_404(committee_id)
+    if not await _committee_access(
+        user, committee, permissions.RAPPORTEUR_SET_COMMITTEE_STATUS
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await database.set_committee_status(committee_id, change.status)
+
+
+@app.get(
+    "/committees/{committee_id}/messages",
+    tags=["Chat"],
+    response_model=list[models.ChatMessage],
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def get_messages(
+    committee_id: int, user: models.AuthUser = Depends(get_current_user)
+):
+    committee = await _committee_or_404(committee_id)
+    if not await _committee_access(user, committee, permissions.CHAT_VIEW):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return await database.get_chat_messages(committee_id)
+
+
+@app.post(
+    "/committees/{committee_id}/messages",
+    tags=["Chat"],
+    status_code=201,
+    response_model=models.ChatMessage,
+    responses={403: {"model": models.ErrorResponse}, 404: {"model": models.ErrorResponse}},
+)
+async def post_message(
+    committee_id: int,
+    message: models.NewChatMessage,
+    user: models.AuthUser = Depends(get_current_user),
+):
+    """Send a message (REST fallback for the WebSocket). Broadcasts to live subscribers."""
+    committee = await _committee_or_404(committee_id)
+    if not await _committee_access(user, committee, permissions.CHAT_POST):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    saved = await database.add_chat_message(
+        committee_id, user.email, message.kind, message.body, message.payload
+    )
+    await chat.hub.broadcast(committee_id, saved.model_dump(mode="json"))
+    return saved
+
+
+@app.websocket("/ws/committees/{committee_id}/chat")
+async def committee_chat_ws(websocket: WebSocket, committee_id: int):
+    """Live chat for a committee's channel. The client sends {"token": "..."} as its first
+    frame (headers aren't reliable on a WebSocket handshake, and query-string tokens leak
+    into logs). After that, each frame is a NewChatMessage. On connect we replay recent
+    history."""
+    await websocket.accept()
+    try:
+        auth_frame = await websocket.receive_json()
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    token = auth_frame.get("token") if isinstance(auth_frame, dict) else None
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        user = await get_current_user(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+
+    committee = await database.get_committee(committee_id)
+    if not committee:
+        await websocket.close(code=4404)
+        return
+    if not await _committee_access(user, committee, permissions.CHAT_VIEW):
+        await websocket.close(code=4403)
+        return
+    can_post = await _committee_access(user, committee, permissions.CHAT_POST)
+
+    await chat.hub.connect(committee_id, websocket)
+    try:
+        for msg in await database.get_chat_messages(committee_id):
+            await websocket.send_json(msg.model_dump(mode="json"))
+        while True:
+            data = await websocket.receive_json()
+            if not can_post:
+                await websocket.send_json({"error": "You cannot post to this channel"})
+                continue
+            try:
+                incoming = models.NewChatMessage(**data)
+            except Exception:
+                await websocket.send_json({"error": "Invalid message"})
+                continue
+            saved = await database.add_chat_message(
+                committee_id, user.email, incoming.kind, incoming.body, incoming.payload
+            )
+            await chat.hub.broadcast(committee_id, saved.model_dump(mode="json"))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await chat.hub.disconnect(committee_id, websocket)
 
 
 #####################################
 # OC STUFF
 #####################################
 
-# again, anyone in the wild can bypass email verification, will fix later
-@app.post("/manual_verify", tags=["OC"], status_code=201)
-async def manual_verify(email: str):
+@app.post(
+    "/manual_verify",
+    tags=["OC"],
+    status_code=201,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        500: {"model": models.ErrorResponse},
+    },
+)
+async def manual_verify(
+    email: str, user: models.AuthUser = Depends(require_any_oc)
+):
+    """Mark a delegate verified when their email did not arrive. Any OC member can do this
+    on the ground (ADR 0003)."""
     try:
         delegate = await database.get_delegate_by_email(email)
         if not delegate:
@@ -725,8 +1184,12 @@ async def manual_verify(email: str):
 
         delegate.verified = True
         await database.update_delegate_by_id(delegate.id, delegate)
+        # If this delegate was on an OC roster, applying invites now makes them a member.
+        await database.apply_pending_invites(delegate.email)
 
         return JSONResponse(status_code=201, content={"message": "Email verified!"})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

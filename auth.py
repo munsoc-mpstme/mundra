@@ -10,6 +10,7 @@ settings = config.get_settings()
 SECRET_KEY = settings.secret_key
 ALGORITHM = "HS256"
 VERIFICATION_TOKEN_EXPIRE_MINUTES = settings.verification_token_expire_minutes
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
@@ -24,6 +25,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> models.AuthUs
         email = payload.get("sub")
         if email is None:
             raise credentials_exception
+    except ExpiredSignatureError:
+        # A distinct 401 so the app can send the user back to the login screen (ADR 0003).
+        raise HTTPException(
+            status_code=401,
+            detail="Session expired, please log in again",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except InvalidTokenError:
         raise credentials_exception
     # The role is read from the database on every request, not from the token, so a
@@ -49,8 +57,55 @@ def require_role(*roles: str):
 
 require_admin = require_role("admin")
 
-def create_access_token(data: dict) -> str:
+
+def require_permission(permission: str):
+    """Only let a caller who holds this permission through. An admin (the system role,
+    ADR 0002) and a head both pass every check; otherwise the permission must come from
+    one of the caller's active team memberships. Read fresh per request (ADR 0003)."""
+
+    async def dependency(
+        user: models.AuthUser = Depends(get_current_user),
+    ) -> models.AuthUser:
+        if user.role == "admin":
+            return user
+        is_head, perms, _ = await database.get_effective_access(user.email)
+        if is_head or permission in perms:
+            return user
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    return dependency
+
+
+async def require_any_oc(
+    user: models.AuthUser = Depends(get_current_user),
+) -> models.AuthUser:
+    """Let through anyone with OC standing: an admin, a head, or a holder of any active
+    membership. Used for actions any OC member does on the ground, such as manual_verify."""
+    if user.role == "admin":
+        return user
+    is_head, _, memberships = await database.get_effective_access(user.email)
+    if is_head or memberships:
+        return user
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+
+async def require_head(
+    user: models.AuthUser = Depends(get_current_user),
+) -> models.AuthUser:
+    """Only a head (or the system admin). For event-wide actions such as setting event
+    dates or reading any roster."""
+    if user.role == "admin":
+        return user
+    is_head, _, _ = await database.get_effective_access(user.email)
+    if is_head:
+        return user
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     to_encode = data.copy()
+    if expires_delta is not None:
+        to_encode.update({"exp": datetime.now(timezone.utc) + expires_delta})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 

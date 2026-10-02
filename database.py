@@ -7,16 +7,16 @@ import asyncio
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, selectinload
 
 import config
 import db
 import models
+import permissions
 
 BACKUP_DIR = os.path.join(os.path.dirname(__file__), "backups")
-
-MEAL_FIELDS = tuple(f"d{day}_{meal}" for day in (1, 2, 3) for meal in ("bf", "lunch", "hitea"))
 
 
 ####################
@@ -73,7 +73,8 @@ def _to_mm_delegate(row: db.DelegateRow) -> models.MMDelegate:
         **_delegate_fields(row),
         country=mm.country,
         committee=mm.committee,
-        **{field: getattr(mm, field) for field in MEAL_FIELDS},
+        food_preference=mm.food_preference,
+        food_notes=mm.food_notes,
     )
 
 
@@ -321,7 +322,8 @@ async def add_mm_delegate(mm_delegate: models.MMDelegate) -> models.MMDelegate:
                 delegate_id=mm_delegate.id,
                 country=mm_delegate.country,
                 committee=mm_delegate.committee,
-                **{field: getattr(mm_delegate, field) for field in MEAL_FIELDS},
+                food_preference=mm_delegate.food_preference,
+                food_notes=mm_delegate.food_notes,
             )
         )
     return mm_delegate
@@ -348,15 +350,15 @@ async def get_mm_delegate_by_email(email: str) -> models.MMDelegate | None:
 
 
 async def update_mm_delegate(id: str, mm_delegate: models.MMDelegate) -> models.MMDelegate:
-    """Updates only the Mumbai MUN fields (country, committee, meals). Profile fields
+    """Updates only the Mumbai MUN fields (country, committee, food). Profile fields
     are changed through update_delegate_by_id."""
     async with db.SessionLocal() as session, session.begin():
         row = await session.get(db.MMDelegateRow, id)
         if row is not None:
             row.country = mm_delegate.country
             row.committee = mm_delegate.committee
-            for field in MEAL_FIELDS:
-                setattr(row, field, getattr(mm_delegate, field))
+            row.food_preference = mm_delegate.food_preference
+            row.food_notes = mm_delegate.food_notes
     return mm_delegate
 
 
@@ -366,6 +368,752 @@ async def delete_mm_delegate(id: str) -> None:
         row = await session.get(db.MMDelegateRow, id)
         if row is not None:
             await session.delete(row)
+
+
+####################
+# ORGANIZING COMMITTEE ACCESS (docs/adr/0003)
+####################
+
+
+async def get_effective_access(
+    email: str,
+) -> tuple[bool, set[str], list[models.Membership]]:
+    """The caller's OC access, read fresh on every request (like the role in ADR 0002):
+    whether they are a head, the union of permissions their active memberships grant, and
+    those memberships. A head holds every permission. A membership is active while its
+    ends_at is null or still in the future.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        is_head = (
+            await session.scalar(
+                select(db.EventHeadRow.id).where(db.EventHeadRow.user_email == email).limit(1)
+            )
+        ) is not None
+
+        rows = (
+            await session.execute(
+                select(db.MembershipRow, db.TeamRow.name)
+                .join(db.TeamRow, db.TeamRow.id == db.MembershipRow.team_id)
+                .where(db.MembershipRow.user_email == email)
+                .where(
+                    or_(
+                        db.MembershipRow.ends_at.is_(None),
+                        db.MembershipRow.ends_at > now,
+                    )
+                )
+                .order_by(db.MembershipRow.created_at, db.MembershipRow.id)
+            )
+        ).all()
+
+        # One query for the permissions of every team involved, then group in Python.
+        team_ids = {row.MembershipRow.team_id for row in rows}
+        perms_by_team: dict[int, list[str]] = {tid: [] for tid in team_ids}
+        if team_ids:
+            for team_id, permission in (
+                await session.execute(
+                    select(db.TeamPermissionRow.team_id, db.TeamPermissionRow.permission)
+                    .where(db.TeamPermissionRow.team_id.in_(team_ids))
+                )
+            ).all():
+                perms_by_team[team_id].append(permission)
+
+    memberships = [
+        models.Membership(
+            team=name,
+            committee=m.committee,
+            level=m.level,
+            permissions=sorted(perms_by_team.get(m.team_id, [])),
+        )
+        for m, name in ((row.MembershipRow, row.name) for row in rows)
+    ]
+
+    if is_head:
+        effective = set(permissions.ALL_PERMISSIONS)
+    else:
+        effective = {p for team in memberships for p in team.permissions}
+    return is_head, effective, memberships
+
+
+async def apply_pending_invites(email: str) -> int:
+    """Turn any team_invites for this email into real memberships and remove the invites.
+    Called when an email becomes verified, so a rostered person is a member the moment
+    they finish signing up. Returns how many invites were applied. Idempotent: an invite
+    for a team the user already belongs to is dropped without a duplicate membership."""
+    async with db.SessionLocal() as session, session.begin():
+        invites = (
+            await session.scalars(
+                select(db.TeamInviteRow).where(db.TeamInviteRow.email == email)
+            )
+        ).all()
+        if not invites:
+            return 0
+
+        existing = set(
+            (
+                await session.scalars(
+                    select(db.MembershipRow.team_id).where(
+                        db.MembershipRow.user_email == email
+                    )
+                )
+            ).all()
+        )
+        # ends_at follows each invite's event end, so applied access still lapses on its own.
+        event_ends = dict(
+            (
+                await session.execute(
+                    select(db.EventRow.id, db.EventRow.ends_at).where(
+                        db.EventRow.id.in_({i.event_id for i in invites})
+                    )
+                )
+            ).all()
+        )
+
+        applied = 0
+        for invite in invites:
+            if invite.team_id not in existing:
+                session.add(
+                    db.MembershipRow(
+                        event_id=invite.event_id,
+                        user_email=email,
+                        team_id=invite.team_id,
+                        committee=invite.committee,
+                        level=invite.level,
+                        ends_at=event_ends.get(invite.event_id),
+                    )
+                )
+                existing.add(invite.team_id)
+                applied += 1
+            await session.delete(invite)
+        return applied
+
+
+####################
+# OC ADMINISTRATION: events, teams, rosters, heads (docs/adr/0003)
+####################
+
+
+def _to_team(row: db.TeamRow) -> models.Team:
+    """Needs row.permissions loaded."""
+    return models.Team(
+        id=row.id,
+        event_id=row.event_id,
+        name=row.name,
+        description=row.description,
+        permissions=sorted(p.permission for p in row.permissions),
+    )
+
+
+async def get_event(event_id: int) -> models.Event | None:
+    async with db.SessionLocal() as session:
+        row = await session.get(db.EventRow, event_id)
+        return (
+            models.Event(id=row.id, name=row.name, starts_at=row.starts_at, ends_at=row.ends_at)
+            if row
+            else None
+        )
+
+
+async def set_event_dates(event_id: int, dates: models.EventDates) -> models.Event | None:
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.EventRow, event_id)
+        if row is None:
+            return None
+        row.starts_at = dates.starts_at
+        row.ends_at = dates.ends_at
+    return await get_event(event_id)
+
+
+async def list_teams(event_id: int) -> list[models.Team]:
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(
+            select(db.TeamRow)
+            .where(db.TeamRow.event_id == event_id)
+            .options(selectinload(db.TeamRow.permissions))
+            .order_by(db.TeamRow.name)
+        )
+        return [_to_team(row) for row in rows]
+
+
+async def create_team(event_id: int, new_team: models.NewTeam) -> models.Team:
+    """Create a team with its permissions. Raises ValueError for an unknown permission or
+    a missing event, and IntegrityError for a duplicate team name in the event."""
+    unknown = set(new_team.permissions) - permissions.ALL_PERMISSIONS
+    if unknown:
+        raise ValueError(f"Unknown permission(s): {', '.join(sorted(unknown))}")
+    async with db.SessionLocal() as session, session.begin():
+        if await session.get(db.EventRow, event_id) is None:
+            raise ValueError("Unknown event")
+        team = db.TeamRow(
+            event_id=event_id, name=new_team.name, description=new_team.description
+        )
+        team.permissions = [
+            db.TeamPermissionRow(permission=p) for p in dict.fromkeys(new_team.permissions)
+        ]
+        session.add(team)
+        await session.flush()
+        team_id = team.id
+    return (await _get_team(team_id))
+
+
+async def _get_team(team_id: int) -> models.Team | None:
+    async with db.SessionLocal() as session:
+        row = await session.scalar(
+            select(db.TeamRow)
+            .where(db.TeamRow.id == team_id)
+            .options(selectinload(db.TeamRow.permissions))
+        )
+        return _to_team(row) if row else None
+
+
+async def set_team_permissions(
+    team_id: int, change: models.TeamPermissionsChange
+) -> models.Team | None:
+    """Replace a team's permissions wholesale. Raises ValueError for an unknown verb."""
+    unknown = set(change.permissions) - permissions.ALL_PERMISSIONS
+    if unknown:
+        raise ValueError(f"Unknown permission(s): {', '.join(sorted(unknown))}")
+    async with db.SessionLocal() as session, session.begin():
+        team = await session.scalar(
+            select(db.TeamRow)
+            .where(db.TeamRow.id == team_id)
+            .options(selectinload(db.TeamRow.permissions))
+        )
+        if team is None:
+            return None
+        # Delete the old rows before inserting the new ones, so re-granting a permission
+        # the team already had does not collide on the (team_id, permission) unique index
+        # mid-flush.
+        team.permissions.clear()
+        await session.flush()
+        team.permissions = [
+            db.TeamPermissionRow(permission=p) for p in dict.fromkeys(change.permissions)
+        ]
+    return await _get_team(team_id)
+
+
+async def is_team_lead(email: str, team_id: int) -> bool:
+    """True if this user is an active lead of this team (used to authorise roster edits)."""
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session:
+        return (
+            await session.scalar(
+                select(db.MembershipRow.id)
+                .where(
+                    db.MembershipRow.user_email == email,
+                    db.MembershipRow.team_id == team_id,
+                    db.MembershipRow.level == "lead",
+                    or_(
+                        db.MembershipRow.ends_at.is_(None),
+                        db.MembershipRow.ends_at > now,
+                    ),
+                )
+                .limit(1)
+            )
+        ) is not None
+
+
+async def add_to_roster(
+    actor_email: str, team_id: int, add: models.RosterAdd
+) -> str:
+    """Add someone to a team: a membership if they already have an account, otherwise an
+    invite that becomes a membership when they verify. Upserts the level/committee if they
+    are already on it. Audited. Returns 'member' or 'invited'. Raises LookupError if the
+    team is gone."""
+    async with db.SessionLocal() as session, session.begin():
+        team = await session.get(db.TeamRow, team_id)
+        if team is None:
+            raise LookupError("Team not found")
+        event = await session.get(db.EventRow, team.event_id)
+
+        registered = (
+            await session.scalar(
+                select(db.UserRow.email).where(db.UserRow.email == add.email)
+            )
+        ) is not None
+
+        action = None
+        if registered:
+            existing = await session.scalar(
+                select(db.MembershipRow).where(
+                    db.MembershipRow.event_id == team.event_id,
+                    db.MembershipRow.user_email == add.email,
+                    db.MembershipRow.team_id == team_id,
+                )
+            )
+            if existing is None:
+                session.add(
+                    db.MembershipRow(
+                        event_id=team.event_id,
+                        user_email=add.email,
+                        team_id=team_id,
+                        committee=add.committee,
+                        level=add.level,
+                        ends_at=event.ends_at if event else None,
+                    )
+                )
+                action = "grant"
+            else:
+                if existing.level != add.level:
+                    action = "level_change"
+                existing.level = add.level
+                existing.committee = add.committee
+            status = "member"
+        else:
+            existing = await session.scalar(
+                select(db.TeamInviteRow).where(
+                    db.TeamInviteRow.email == add.email,
+                    db.TeamInviteRow.team_id == team_id,
+                )
+            )
+            if existing is None:
+                session.add(
+                    db.TeamInviteRow(
+                        email=add.email,
+                        event_id=team.event_id,
+                        team_id=team_id,
+                        committee=add.committee,
+                        level=add.level,
+                    )
+                )
+                action = "grant"
+            else:
+                existing.level = add.level
+                existing.committee = add.committee
+            status = "invited"
+
+        if action:
+            session.add(
+                db.MembershipAuditRow(
+                    actor_email=actor_email,
+                    target_email=add.email,
+                    team_name=team.name,
+                    action=action,
+                )
+            )
+        return status
+
+
+async def remove_from_roster(actor_email: str, team_id: int, email: str) -> bool:
+    """Remove someone from a team (membership and/or pending invite). Audited. Returns
+    False if they were not on the roster. Raises LookupError if the team is gone."""
+    async with db.SessionLocal() as session, session.begin():
+        team = await session.get(db.TeamRow, team_id)
+        if team is None:
+            raise LookupError("Team not found")
+
+        removed = False
+        membership = await session.scalar(
+            select(db.MembershipRow).where(
+                db.MembershipRow.user_email == email,
+                db.MembershipRow.team_id == team_id,
+            )
+        )
+        if membership is not None:
+            await session.delete(membership)
+            removed = True
+        invite = await session.scalar(
+            select(db.TeamInviteRow).where(
+                db.TeamInviteRow.email == email, db.TeamInviteRow.team_id == team_id
+            )
+        )
+        if invite is not None:
+            await session.delete(invite)
+            removed = True
+
+        if removed:
+            session.add(
+                db.MembershipAuditRow(
+                    actor_email=actor_email,
+                    target_email=email,
+                    team_name=team.name,
+                    action="revoke",
+                )
+            )
+        return removed
+
+
+async def list_team_members(team_id: int) -> list[models.RosterEntry]:
+    """The team's current members (with names) and any pending invites."""
+    async with db.SessionLocal() as session:
+        members = (
+            await session.execute(
+                select(
+                    db.MembershipRow.user_email,
+                    db.DelegateRow.firstname,
+                    db.DelegateRow.lastname,
+                    db.MembershipRow.committee,
+                    db.MembershipRow.level,
+                )
+                .join(db.DelegateRow, db.DelegateRow.email == db.MembershipRow.user_email)
+                .where(db.MembershipRow.team_id == team_id)
+                .order_by(db.DelegateRow.firstname)
+            )
+        ).all()
+        invites = (
+            await session.execute(
+                select(
+                    db.TeamInviteRow.email,
+                    db.TeamInviteRow.committee,
+                    db.TeamInviteRow.level,
+                )
+                .where(db.TeamInviteRow.team_id == team_id)
+                .order_by(db.TeamInviteRow.email)
+            )
+        ).all()
+
+    entries = [
+        models.RosterEntry(
+            email=email,
+            name=f"{firstname} {lastname}",
+            committee=committee,
+            level=level,
+            status="member",
+        )
+        for email, firstname, lastname, committee, level in members
+    ]
+    entries += [
+        models.RosterEntry(email=email, committee=committee, level=level, status="invited")
+        for email, committee, level in invites
+    ]
+    return entries
+
+
+async def list_heads(event_id: int) -> list[str]:
+    async with db.SessionLocal() as session:
+        return list(
+            (
+                await session.scalars(
+                    select(db.EventHeadRow.user_email)
+                    .where(db.EventHeadRow.event_id == event_id)
+                    .order_by(db.EventHeadRow.user_email)
+                )
+            ).all()
+        )
+
+
+async def add_head(actor_email: str, event_id: int, email: str) -> bool:
+    """Grant an existing user the head role for an event. Returns False if they already
+    have it. Raises LookupError if there is no such user or event."""
+    async with db.SessionLocal() as session, session.begin():
+        if await session.get(db.EventRow, event_id) is None:
+            raise LookupError("Event not found")
+        if (
+            await session.scalar(select(db.UserRow.email).where(db.UserRow.email == email))
+        ) is None:
+            raise LookupError("No such user; register the account first")
+        existing = await session.scalar(
+            select(db.EventHeadRow.id).where(
+                db.EventHeadRow.event_id == event_id,
+                db.EventHeadRow.user_email == email,
+            )
+        )
+        if existing is not None:
+            return False
+        session.add(
+            db.EventHeadRow(event_id=event_id, user_email=email, granted_by=actor_email)
+        )
+        return True
+
+
+async def remove_head(event_id: int, email: str) -> bool:
+    """Revoke a head grant. Returns False if they were not a head."""
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.scalar(
+            select(db.EventHeadRow).where(
+                db.EventHeadRow.event_id == event_id,
+                db.EventHeadRow.user_email == email,
+            )
+        )
+        if row is None:
+            return False
+        await session.delete(row)
+        return True
+
+
+####################
+# FOOD: preference and meal collection (docs/adr/0003)
+####################
+
+
+async def set_food_preference(
+    id: str, change: models.FoodPreferenceChange
+) -> models.MMDelegate | None:
+    """Set an MM delegate's diet (a delegate for themselves, or hospitality on the day).
+    food_preference is set to the given value, including None to clear it; food_notes is
+    left untouched when the change omits it (sends None)."""
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.MMDelegateRow, id)
+        if row is None:
+            return None
+        row.food_preference = change.food_preference
+        if change.food_notes is not None:
+            row.food_notes = change.food_notes
+    return await get_mm_delegate_by_id(id)
+
+
+async def resolve_current_event_day(
+    now: datetime | None = None,
+) -> tuple[int, int]:
+    """The (event_id, 1-based day) whose date range contains today, so the scanner never
+    has to be told which day it is. Raises LookupError if no event's dates cover today
+    (dates unset, or scanning outside the conference), for a clear message to the operator.
+    """
+    today = (now or datetime.now(timezone.utc)).date()
+    async with db.SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(db.EventRow.id, db.EventRow.starts_at, db.EventRow.ends_at).where(
+                    db.EventRow.starts_at.is_not(None), db.EventRow.ends_at.is_not(None)
+                )
+            )
+        ).all()
+    for event_id, starts_at, ends_at in rows:
+        if starts_at.date() <= today <= ends_at.date():
+            return event_id, (today - starts_at.date()).days + 1
+    raise LookupError("No event is running today; set the event dates first")
+
+
+async def record_meal_scan(
+    event_id: int, day: int, meal: str, delegate_id: str, scanned_by: str
+) -> models.ScanResult:
+    """Record that a delegate collected a meal. Inserts a meal_scans row; if they already
+    collected this meal the unique constraint rejects it, and we log the attempt to
+    meal_scan_flags and return a `duplicate` result instead. Raises LookupError if the id
+    is not a Mumbai MUN delegate."""
+    async with db.SessionLocal() as session:
+        found = (
+            await session.execute(
+                select(
+                    db.DelegateRow.firstname,
+                    db.DelegateRow.lastname,
+                    db.MMDelegateRow.food_preference,
+                )
+                .join(db.MMDelegateRow, db.MMDelegateRow.delegate_id == db.DelegateRow.id)
+                .where(db.DelegateRow.id == delegate_id)
+            )
+        ).first()
+        if found is None:
+            raise LookupError("Not a Mumbai MUN delegate")
+        firstname, lastname, preference = found
+
+        session.add(
+            db.MealScanRow(
+                event_id=event_id,
+                delegate_id=delegate_id,
+                day=day,
+                meal=meal,
+                served_by=scanned_by,
+            )
+        )
+        try:
+            await session.commit()
+            result = "served"
+        except IntegrityError:
+            await session.rollback()
+            session.add(
+                db.MealScanFlagRow(
+                    event_id=event_id,
+                    delegate_id=delegate_id,
+                    day=day,
+                    meal=meal,
+                    scanned_by=scanned_by,
+                )
+            )
+            await session.commit()
+            result = "duplicate"
+
+    return models.ScanResult(
+        result=result,
+        delegate_id=delegate_id,
+        name=f"{firstname} {lastname}",
+        food_preference=preference,
+        day=day,
+        meal=meal,
+    )
+
+
+async def get_plate_count(event_id: int, day: int, meal: str) -> models.MealCount:
+    """The live count of plates served for one meal, broken down by diet."""
+    async with db.SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(db.MMDelegateRow.food_preference, func.count())
+                .join(
+                    db.MealScanRow,
+                    db.MealScanRow.delegate_id == db.MMDelegateRow.delegate_id,
+                )
+                .where(
+                    db.MealScanRow.event_id == event_id,
+                    db.MealScanRow.day == day,
+                    db.MealScanRow.meal == meal,
+                )
+                .group_by(db.MMDelegateRow.food_preference)
+            )
+        ).all()
+
+    by_pref = {preference: count for preference, count in rows}
+    return models.MealCount(
+        day=day,
+        meal=meal,
+        total=sum(by_pref.values()),
+        veg=by_pref.get("veg", 0),
+        non_veg=by_pref.get("non_veg", 0),
+        jain=by_pref.get("jain", 0),
+        unspecified=by_pref.get(None, 0),
+    )
+
+
+async def get_flagged_scans(event_id: int) -> list[models.FlaggedScan]:
+    """Every rejected second-scan for the event, newest first: hospitality's flagged list."""
+    async with db.SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(
+                    db.MealScanFlagRow.delegate_id,
+                    db.DelegateRow.firstname,
+                    db.DelegateRow.lastname,
+                    db.MealScanFlagRow.day,
+                    db.MealScanFlagRow.meal,
+                    db.MealScanFlagRow.scanned_by,
+                    db.MealScanFlagRow.created_at,
+                )
+                .join(db.DelegateRow, db.DelegateRow.id == db.MealScanFlagRow.delegate_id)
+                .where(db.MealScanFlagRow.event_id == event_id)
+                .order_by(db.MealScanFlagRow.created_at.desc())
+            )
+        ).all()
+    return [
+        models.FlaggedScan(
+            delegate_id=delegate_id,
+            name=f"{firstname} {lastname}",
+            day=day,
+            meal=meal,
+            scanned_by=scanned_by,
+            at=created_at,
+        )
+        for delegate_id, firstname, lastname, day, meal, scanned_by, created_at in rows
+    ]
+
+
+####################
+# CHAT: committees and messages (docs/adr/0003)
+####################
+
+
+def _to_committee(row: db.CommitteeRow) -> models.Committee:
+    return models.Committee(
+        id=row.id, event_id=row.event_id, name=row.name, status=row.status
+    )
+
+
+async def create_committee(event_id: int, new: models.NewCommittee) -> models.Committee:
+    """Raises ValueError if the event is missing, IntegrityError on a duplicate name."""
+    async with db.SessionLocal() as session, session.begin():
+        if await session.get(db.EventRow, event_id) is None:
+            raise ValueError("Unknown event")
+        row = db.CommitteeRow(event_id=event_id, name=new.name)
+        session.add(row)
+        await session.flush()
+        return _to_committee(row)
+
+
+async def list_committees(event_id: int) -> list[models.Committee]:
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(
+            select(db.CommitteeRow)
+            .where(db.CommitteeRow.event_id == event_id)
+            .order_by(db.CommitteeRow.name)
+        )
+        return [_to_committee(row) for row in rows]
+
+
+async def get_committee(committee_id: int) -> models.Committee | None:
+    async with db.SessionLocal() as session:
+        row = await session.get(db.CommitteeRow, committee_id)
+        return _to_committee(row) if row else None
+
+
+async def set_committee_status(
+    committee_id: int, status: str
+) -> models.Committee | None:
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.CommitteeRow, committee_id)
+        if row is None:
+            return None
+        row.status = status
+        return _to_committee(row)
+
+
+async def add_chat_message(
+    committee_id: int,
+    sender_email: str,
+    kind: str,
+    body: str,
+    payload: dict | None,
+) -> models.ChatMessage:
+    """Persist one message and return it with the sender's display name."""
+    async with db.SessionLocal() as session, session.begin():
+        name = await session.scalar(
+            select(db.DelegateRow.firstname + " " + db.DelegateRow.lastname).where(
+                db.DelegateRow.email == sender_email
+            )
+        )
+        row = db.ChatMessageRow(
+            committee_id=committee_id,
+            sender_email=sender_email,
+            kind=kind,
+            body=body,
+            payload=payload,
+        )
+        session.add(row)
+        await session.flush()
+        return models.ChatMessage(
+            id=row.id,
+            committee_id=row.committee_id,
+            sender_email=row.sender_email,
+            sender_name=name or sender_email,
+            kind=row.kind,
+            body=row.body,
+            payload=row.payload,
+            created_at=row.created_at,
+        )
+
+
+async def get_chat_messages(committee_id: int, limit: int = 50) -> list[models.ChatMessage]:
+    """The most recent messages for a committee, returned oldest-first for display."""
+    async with db.SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(
+                    db.ChatMessageRow,
+                    (db.DelegateRow.firstname + " " + db.DelegateRow.lastname).label("name"),
+                )
+                .join(
+                    db.DelegateRow,
+                    db.DelegateRow.email == db.ChatMessageRow.sender_email,
+                    isouter=True,
+                )
+                .where(db.ChatMessageRow.committee_id == committee_id)
+                .order_by(db.ChatMessageRow.id.desc())
+                .limit(limit)
+            )
+        ).all()
+    messages = [
+        models.ChatMessage(
+            id=m.id,
+            committee_id=m.committee_id,
+            sender_email=m.sender_email,
+            sender_name=name or m.sender_email,
+            kind=m.kind,
+            body=m.body,
+            payload=m.payload,
+            created_at=m.created_at,
+        )
+        for m, name in rows
+    ]
+    messages.reverse()
+    return messages
 
 
 ####################

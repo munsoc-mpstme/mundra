@@ -107,7 +107,7 @@ async def test_mm_delegate_combines_profile_and_mm_fields():
 
     loaded = await database.get_mm_delegate_by_id(mm.id)
     assert (loaded.country, loaded.committee) == ("France", "UNSC")
-    assert loaded.d1_bf is True and loaded.d1_lunch is False  # column defaults
+    assert loaded.food_preference is None and loaded.food_notes == ""  # column defaults
     assert loaded.pastmuns[0].name == "Prior"
     assert (await database.get_mm_delegate_by_email(mm.email)).id == mm.id
 
@@ -118,15 +118,15 @@ async def test_plain_delegate_is_not_an_mm_delegate():
     assert delegate.id not in {m.id for m in await database.get_mm_delegates()}
 
 
-async def test_update_mm_delegate_changes_meals_only():
+async def test_update_mm_delegate_changes_mm_fields_only():
     mm = await _mm_delegate()
-    mm.d2_lunch = True
+    mm.food_preference = "jain"
     mm.country = "India"
     mm.firstname = "Ignored"  # profile fields are not this function's business
     await database.update_mm_delegate(mm.id, mm)
 
     loaded = await database.get_mm_delegate_by_id(mm.id)
-    assert loaded.d2_lunch is True and loaded.country == "India"
+    assert loaded.food_preference == "jain" and loaded.country == "India"
     assert loaded.firstname == "Ada"
 
 
