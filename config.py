@@ -1,10 +1,15 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from sqlalchemy.engine import URL
+from sqlalchemy.engine import URL, make_url
 
 class Settings(BaseSettings):
     secret_key: str
-    postgres_password: str
+    # A full connection string (e.g. Supabase or Render). When set, it wins over the
+    # POSTGRES_* parts below, so a managed host needs only this one variable. Local dev
+    # leaves it unset and uses the POSTGRES_* parts with docker-compose.
+    database_url_raw: str | None = Field(default=None, alias="DATABASE_URL")
+    postgres_password: str = ""
     postgres_user: str = "mundra"
     postgres_db: str = "mundra"
     postgres_host: str = "localhost"
@@ -30,10 +35,20 @@ class Settings(BaseSettings):
     docs_url: str | None = None
     redoc_url: str = "/docs"
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env", populate_by_name=True)
 
     @property
     def database_url(self) -> URL:
+        if self.database_url_raw:
+            # Normalise the driver to asyncpg and drop libpq-only query args (sslmode,
+            # pgbouncer, ...) that asyncpg cannot parse; SSL is handled in db_connect_args.
+            raw = self.database_url_raw
+            for prefix in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
+                if raw.startswith(prefix):
+                    raw = "postgresql+asyncpg://" + raw[len(prefix):]
+                    break
+            url = make_url(raw)
+            return url.set(query={}) if url.query else url
         # URL.create escapes the password, so special characters are safe.
         return URL.create(
             "postgresql+asyncpg",
@@ -43,6 +58,15 @@ class Settings(BaseSettings):
             port=self.postgres_port,
             database=self.postgres_db,
         )
+
+    @property
+    def db_connect_args(self) -> dict:
+        """Extra asyncpg connect args. A managed host (DATABASE_URL set) needs SSL;
+        statement_cache_size=0 keeps it working behind a transaction pooler (pgbouncer),
+        which cannot reuse prepared statements. Local docker Postgres needs neither."""
+        if self.database_url_raw:
+            return {"ssl": "require", "statement_cache_size": 0}
+        return {}
 
 @lru_cache
 def get_settings() -> Settings:

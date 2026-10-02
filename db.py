@@ -52,11 +52,13 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
+_settings = config.get_settings()
 engine = create_async_engine(
-    config.get_settings().database_url,
+    _settings.database_url,
     pool_size=10,
     max_overflow=10,
     pool_pre_ping=True,
+    connect_args=_settings.db_connect_args,
 )
 
 # expire_on_commit=False: attributes stay readable after commit, which async

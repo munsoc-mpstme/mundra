@@ -22,7 +22,8 @@ if config.config_file_name is not None:
 target_metadata = db.Base.metadata
 
 # The connection URL comes from the app settings (.env / environment), not alembic.ini.
-database_url = app_config.get_settings().database_url
+_settings = app_config.get_settings()
+database_url = _settings.database_url
 
 
 def run_migrations_offline() -> None:
@@ -61,7 +62,9 @@ async def run_async_migrations() -> None:
 
     """
 
-    connectable = create_async_engine(database_url, poolclass=pool.NullPool)
+    connectable = create_async_engine(
+        database_url, poolclass=pool.NullPool, connect_args=_settings.db_connect_args
+    )
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
