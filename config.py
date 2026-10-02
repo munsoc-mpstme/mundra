@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     # and MAIL_SSL_TLS=true.
     mail_starttls: bool = True
     mail_ssl_tls: bool = False
-    docs_url: str | None = None
-    redoc_url: str = "/docs"
+    docs_url: str | None = "/docs"  # Swagger UI
+    redoc_url: str | None = "/redoc"  # ReDoc
 
     model_config = SettingsConfigDict(env_file=".env", populate_by_name=True)
 
