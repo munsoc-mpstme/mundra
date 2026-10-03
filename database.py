@@ -239,6 +239,60 @@ async def make_admin(email: str) -> str:
 ####################
 
 
+async def ensure_bootstrap_admin(
+    email: str, password_hash: str | None = None
+) -> str:
+    """Make `email` an admin (and verified), creating the account if it is missing and a
+    password hash was given. Used at startup for ADMIN_EMAIL / ADMIN_PASSWORD, so the first
+    admin needs no shell on the host. Never changes an existing account's password.
+
+    Returns "created", "promoted" (role or verification changed), "unchanged" (already a
+    verified admin) or "missing" (no such account and no password to create one with).
+    """
+    async with db.SessionLocal() as session, session.begin():
+        delegate = await session.scalar(
+            select(db.DelegateRow).where(db.DelegateRow.email == email)
+        )
+        user = await session.get(db.UserRow, email, with_for_update=True)
+        if user is None and password_hash is None:
+            return "missing"  # nothing to promote and no password to create one with
+        outcome = "unchanged"
+
+        if delegate is None:
+            delegate = db.DelegateRow(
+                id=secrets.token_hex(16),
+                firstname="Admin",
+                lastname="User",
+                email=email,
+                verified=True,
+            )
+            session.add(delegate)
+            await session.flush()  # the user row references the delegate's email
+            outcome = "created"
+        elif not delegate.verified:
+            delegate.verified = True
+            outcome = "promoted"
+
+        if user is None:
+            user = db.UserRow(email=email, password=password_hash, role="delegate")
+            session.add(user)
+            outcome = "created" if outcome == "created" else "promoted"
+
+        if user.role != "admin":
+            session.add(
+                db.AdminAuditRow(
+                    actor_email="system:startup",
+                    target_email=email,
+                    old_role=user.role,
+                    new_role="admin",
+                )
+            )
+            user.role = "admin"
+            if outcome == "unchanged":
+                outcome = "promoted"
+        return outcome
+
+
 async def add_delegate(delegate: models.Delegate) -> models.Delegate:
     row = db.DelegateRow(
         id=delegate.id,
