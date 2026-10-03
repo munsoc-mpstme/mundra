@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import logging
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from io import StringIO
@@ -147,6 +148,7 @@ async def register(request: Request, user: models.User):
     response_model=models.Token,
     responses={
         401: {"model": models.ErrorResponse},
+        403: {"model": models.ErrorResponse},
         500: {"model": models.ErrorResponse},
     },
 )
@@ -160,6 +162,11 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         raise HTTPException(status_code=401, detail="Invalid email")
     if not await asyncio.to_thread(verify_password, password, user.password):
         raise HTTPException(status_code=401, detail="Invalid password")
+    # No token until the email is verified: the app sends them to the code screen instead.
+    # (Checked after the password so this does not reveal which emails are registered.)
+    account = await database.get_auth_user(user.email)
+    if account is not None and not account.verified:
+        raise HTTPException(status_code=403, detail="Please verify your email!")
 
     # user_type keeps the two values the app already understands; "oc" reports as "user".
     user_type = "admin" if await database.get_role(user.email) == "admin" else "user"
@@ -178,7 +185,29 @@ async def send_verification_code(delegate: models.Delegate) -> None:
         minutes=settings.verification_code_expire_minutes
     )
     await database.set_verification_code(delegate.email, code, expires_at)
+    if settings.mail_server in ("localhost", "127.0.0.1"):
+        # Local development has no mail server to deliver the email, so show the code here.
+        logging.getLogger("uvicorn.error").warning(
+            "DEV ONLY (MAIL_SERVER is localhost): verification code for %s is %s",
+            delegate.email,
+            code,
+        )
     await mails.send_verification_email(delegate, code)
+
+
+async def _send_code_if_unverified(delegate: models.Delegate) -> bool:
+    """Email a fresh code to a delegate who still has to verify. Returns whether one was
+    sent; a mail failure is logged and reported, not raised, so sign-up still succeeds."""
+    if delegate.verified:
+        return False
+    try:
+        await send_verification_code(delegate)
+        return True
+    except Exception:
+        logging.getLogger("uvicorn.error").exception(
+            "Could not send the verification code to %s", delegate.email
+        )
+        return False
 
 
 @app.post(
@@ -566,10 +595,6 @@ async def mm_register(request: Request, user: models.User):
                 raise HTTPException(
                     status_code=400, detail="User exists but is not a delegate."
                 )
-            if not delegate.verified:
-                delegate.verified = True
-                await database.update_delegate_by_id(delegate.id, delegate)
-
             mm_delegate = await database.get_mm_delegate_by_email(user.email)
 
             if mm_delegate:
@@ -592,10 +617,13 @@ async def mm_register(request: Request, user: models.User):
                 )
             )
 
+            email_sent = await _send_code_if_unverified(delegate)
             return JSONResponse(
                 status_code=201,
                 content={
-                    "message": f"Mumbai MUN Delegate registered successfully! ID: {mm_delegate.id}"
+                    "message": f"Mumbai MUN Delegate registered successfully! ID: {mm_delegate.id}",
+                    "verified": delegate.verified,
+                    "email_sent": email_sent,
                 },
             )
 
@@ -611,15 +639,11 @@ async def mm_register(request: Request, user: models.User):
                         lastname=user.lastname,
                         email=user.email,
                         backup_email=user.backup_email,
-                        verified=True,
+                        verified=False,  # becomes True only when they enter the emailed code
                     )
                 )
 
             await database.add_user(user)
-
-            if not delegate.verified:
-                delegate.verified = True
-                await database.update_delegate_by_id(delegate.id, delegate)
 
             mm_delegate = await database.add_mm_delegate(
                 models.MMDelegate(
@@ -635,17 +659,20 @@ async def mm_register(request: Request, user: models.User):
                 )
             )
 
-            try:
-                await send_verification_code(delegate)
-                return JSONResponse(
-                    status_code=201,
-                    content={
-                        "message": f"User with id {delegate.id} created successfully!"
-                    },
-                )
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            # The account exists but cannot log in until the code is entered. If the email
+            # could not be sent the account is still created; the app offers "Resend code".
+            email_sent = await _send_code_if_unverified(delegate)
+            return JSONResponse(
+                status_code=201,
+                content={
+                    "message": f"User with id {delegate.id} created successfully!",
+                    "verified": delegate.verified,
+                    "email_sent": email_sent,
+                },
+            )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

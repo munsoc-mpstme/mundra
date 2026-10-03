@@ -6,7 +6,7 @@
 
 | Environment | Branch | Documentation URL                        |
 | -------------| --------| ------------------------------------------|
-| PROD        | main   | https://mundra.munsocietympstme.com/docs |
+| PROD        | master | https://mundra.onrender.com/docs         |
 
 This backend is used by the Delego app will be available at
 AppStore and PlayStore soon.
@@ -171,9 +171,10 @@ This backend is built with FastAPI to handle authentication, delegate management
 ### Auth Routes
 
  1. `POST /register`: Register a new user (creates Delegate if needed).
- 2. `POST /login`: Obtain JWT with email + password.
- 3. `GET /verify_email`: Verifies email with token.
- 4. `GET /resend_verification`: Resend verification email.
+ 2. `POST /login`: Obtain JWT with email + password. An account whose email is not verified
+    yet gets `403 "Please verify your email!"` and no token.
+ 3. `POST /verify_email`: Verify the email with the 6-digit code (`{"email", "code"}`).
+ 4. `GET /resend_verification`: Email a new 6-digit code.
  5. `GET /forgot_password`: Send password reset email.
  6. `PATCH /change_pass`: Change an authenticated delegate’s password.
  7. `DELETE /account`: Delete an authenticated delegate’s account.
@@ -194,7 +195,11 @@ This backend is built with FastAPI to handle authentication, delegate management
 
 ### Mumbai MUN Routes
 
- 1. `POST /mumbaimun/register`: Register user as Mumbai MUN delegate.
+ 1. `POST /mumbaimun/register`: Register user as Mumbai MUN delegate. The account starts
+    unverified and a 6-digit code is emailed; it cannot log in until `POST /verify_email`
+    accepts the code. The response reports `verified` and `email_sent` (if the email could
+    not be sent the account is still created and the app offers "Send a new code").
+    With `MAIL_SERVER=localhost` (local development) the code is printed in the server log.
  2. `GET /mumbaimun/delegates`: Returns all MM delegates in JSON or CSV (admin only).
  3. `GET /mumbaimun/delegates/me`: The caller's own MM details (name, food preference).
  4. `PATCH /mumbaimun/delegates/{id}/food_preference`: Set a delegate's diet (self, or
