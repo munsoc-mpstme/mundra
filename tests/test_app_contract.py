@@ -24,7 +24,7 @@ def make(**kwargs):
 EXPECTED = {
     "delegate": {"guides.view", "badge.view"},
     "eb": {"guides.view", "badge.view", "eb.tools"},
-    "oc": {"eb.tools", "food.scan", "chat.view", "chat.send_request", "chat.respond"},
+    "oc": {"eb.tools", "food.scan", "chat.view", "chat.send_request"},
     "admin": {
         "guides.view", "badge.view", "eb.tools", "food.scan",
         "chat.view", "chat.send_request", "chat.respond", "admin.roles",
@@ -48,8 +48,19 @@ def test_a_team_member_also_gets_the_matching_app_permissions(client):
     team = make_team(event, "Hosp", perms=[permissions.CHAT_VIEW, permissions.CHAT_POST])
     add_membership(email, event, team)
     perms = set(client.get("/delegates/me", headers=auth_header(email)).json()["permissions"])
-    assert {"chat.view", "chat.send_request", "chat.respond"} <= perms
+    # An unscoped team with chat.post (hospitality) answers requests; it does not make them.
+    assert {"chat.view", "chat.respond"} <= perms
+    assert "chat.send_request" not in perms
     assert "food.scan" not in perms and "admin.roles" not in perms
+
+    # A committee-scoped team with chat.post (a rapporteur) makes requests for its committee.
+    rapporteur = make()
+    scoped = make_team(event, "Rapporteurs-ct", perms=[permissions.CHAT_VIEW, permissions.CHAT_POST])
+    add_membership(rapporteur, event, scoped, committee="UNSC")
+    perms = set(
+        client.get("/delegates/me", headers=auth_header(rapporteur)).json()["permissions"]
+    )
+    assert "chat.send_request" in perms and "chat.respond" not in perms
 
 
 # ---- meal scanning, as scan_queue.dart sends it ----------------------------------------
@@ -168,25 +179,112 @@ def post(client, who, cid, **body):
     return client.post(f"/committees/{cid}/messages", json=body, headers=auth_header(who))
 
 
-def test_each_break_action_is_saved_with_standard_text_and_the_apps_fields(client):
-    oc = make(role="oc")
+def hospitality_member():
+    """A plain delegate-role user on a Hospitality team (scanner + answers requests)."""
+    from test_teams import add_membership, make_event, make_team
+
+    email = make()
+    event = make_event()
+    team = make_team(
+        event,
+        "Hospitality-" + email[:8],
+        perms=[permissions.FOOD_MANAGE_ENTITLEMENT, permissions.CHAT_VIEW, permissions.CHAT_POST],
+    )
+    add_membership(email, event, team)
+    return email
+
+
+TEXT = {
+    "free": "We are free for a break",
+    "late": "Running 5 minutes late",
+    "accept": "Accepted - come down now",
+    "reject": "Rejected - canteen is full",
+}
+
+
+def check_saved(res, kind, sender, cid):
+    assert res.status_code == 201, res.text
+    m = res.json()
+    assert m["type"] == kind and m["body"] == TEXT[kind]
+    assert m["sender"] == sender and m["sender_name"] and m["created_at"]
+    assert m["committee_id"] == cid and isinstance(m["id"], int)
+
+
+def test_oc_requests_and_hospitality_answers_with_the_apps_fields(client):
+    oc, hospitality = make(role="oc"), hospitality_member()
     cid = committee_id(client, oc)
-    expected = {
-        "free": "We are free for a break",
-        "late": "Running 5 minutes late",
-        "accept": "Accepted - come down now",
-        "reject": "Rejected - canteen is full",
-    }
-    for kind, text in expected.items():
-        res = post(client, oc, cid, type=kind)
-        assert res.status_code == 201, res.text
-        m = res.json()
-        assert m["type"] == kind and m["body"] == text
-        assert m["sender"] == oc and m["sender_name"] and m["created_at"]
-        assert m["committee_id"] == cid and isinstance(m["id"], int)
+
+    for kind in ("free", "late"):
+        check_saved(post(client, oc, cid, type=kind), kind, oc, cid)
+    for kind in ("accept", "reject"):
+        check_saved(post(client, hospitality, cid, type=kind), kind, hospitality, cid)
 
     history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
-    assert [m["type"] for m in history[-4:]] == list(expected)
+    assert [m["type"] for m in history[-4:]] == ["free", "late", "accept", "reject"]
+
+
+def test_the_oc_role_cannot_accept_or_reject(client):
+    oc = make(role="oc")
+    cid = committee_id(client, oc)
+    for kind in ("accept", "reject"):
+        assert post(client, oc, cid, type=kind).status_code == 403
+
+
+def test_hospitality_cannot_make_requests(client):
+    hospitality = hospitality_member()
+    cid = committee_id(client, hospitality)
+    for kind in ("free", "late"):
+        assert post(client, hospitality, cid, type=kind).status_code == 403
+
+
+def test_the_generic_form_cannot_smuggle_past_the_split(client):
+    oc, hospitality = make(role="oc"), hospitality_member()
+    cid = committee_id(client, oc)
+    # Same thing as {"type": "accept"}, spelled as an ordinary status message.
+    sneaky = post(client, oc, cid, kind="status", payload={"type": "accept"})
+    assert sneaky.status_code == 403
+    assert post(client, hospitality, cid, kind="status", payload={"type": "free"}).status_code == 403
+    # Status messages with some other payload are not break actions.
+    assert post(client, oc, cid, kind="status", payload={"type": "minutes", "n": 5}).status_code == 201
+
+
+def test_a_rapporteur_requests_only_for_their_own_committee(client):
+    from test_teams import add_membership, make_event, make_team
+
+    rapporteur, event = make(), make_event()
+    team = make_team(
+        event, "Rapporteurs-" + rapporteur[:6], perms=[permissions.CHAT_VIEW, permissions.CHAT_POST]
+    )
+    add_membership(rapporteur, event, team, committee="UNSC")
+    admin = make(role="admin")
+    unsc, ccc = committee_id(client, admin, "UNSC"), committee_id(client, admin, "CCC")
+
+    assert post(client, rapporteur, unsc, type="late").status_code == 201
+    assert post(client, rapporteur, unsc, type="accept").status_code == 403
+    assert post(client, rapporteur, ccc, type="late").status_code == 403
+
+
+def test_admin_can_use_every_action(client):
+    admin = make(role="admin")
+    cid = committee_id(client, admin)
+    for kind in ("free", "late", "accept", "reject"):
+        assert post(client, admin, cid, type=kind).status_code == 201
+
+
+def test_the_live_feed_applies_the_same_split(client):
+    oc = make(role="oc")
+    cid = committee_id(client, oc, "PSC")
+    token = auth.create_access_token({"sub": oc})
+    with client.websocket_connect(f"/ws/committees/{cid}/chat") as ws:
+        ws.send_json({"token": token})
+        ws.send_json({"type": "accept"})
+        for _ in range(60):  # skip the history replay until the server's answer
+            msg = ws.receive_json()
+            if "error" in msg:
+                assert "cannot send" in msg["error"]
+                break
+        else:
+            raise AssertionError("no error for an OC trying to accept over the socket")
 
 
 def test_break_actions_reject_bad_types_and_the_wrong_people(client):

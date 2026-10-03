@@ -271,12 +271,14 @@ replays its exact requests. They sit on top of the OC model above without replac
   | --- | --- |
   | `delegate` | `guides.view`, `badge.view` |
   | `eb` | `guides.view`, `badge.view`, `eb.tools` |
-  | `oc` | `eb.tools`, `food.scan`, `chat.view`, `chat.send_request`, `chat.respond` |
+  | `oc` | `eb.tools`, `food.scan`, `chat.view`, `chat.send_request` |
   | `admin` | all of the above plus `admin.roles` |
 
   A team member or head also gets `food.scan` / `chat.*` from the matching team
-  permission. These strings only decide what the app shows; the server checks the real
-  permission on every route.
+  permission: `chat.post` on an unscoped team (Hospitality) gives `chat.respond`, and on a
+  committee-scoped team (a rapporteur) gives `chat.send_request` for that committee. These
+  strings decide what the app shows, and the server enforces the same rule on every route
+  and on the live feed.
 - **The `oc` role is the baseline for meal scanning and break coordination.** An OC
   member can scan meals, read plate counts and use every committee's chat without being
   on a team. Teams and heads still work as before, and `/food/flags` stays team/head only.
@@ -285,7 +287,11 @@ replays its exact requests. They sit on top of the OC model above without replac
   per day" holds on any day. Set the dates with `PATCH /events/{id}` to get day 1, 2, 3.
 - **Break requests.** `POST /committees/{id}/messages` accepts `{"type": "free" | "late" |
   "accept" | "reject"}`, stored as a `status` message with that quick action in its
-  payload and a standard text if no body is sent. Messages carry the aliases `sender`
+  payload and a standard text if no body is sent. The committee side asks (`free`, `late`:
+  the `oc` role, or a committee's own rapporteur) and hospitality answers (`accept`,
+  `reject`: a member of a team with unscoped `chat.post`). Admins and heads can do both.
+  Anyone else gets 403, including when the same action is sent as a plain `status`
+  message or over the WebSocket. Messages carry the aliases `sender`
   (the sender's email) and `type`, next to the upstream fields. The eight committees
   (UNSC, CCC, PSC, WTO, UNODC, UNICEF, ECOSOC, IPC) are seeded into the first event.
 - **Roles.** `eb` (executive board) is a fourth role, assignable with
