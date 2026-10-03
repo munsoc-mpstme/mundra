@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import logging
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from io import StringIO
@@ -28,8 +29,11 @@ from slowapi.util import get_remote_address
 
 from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
-    check_verification_token,
+    oauth2_scheme,
     create_access_token,
+    create_reset_token,
+    verify_reset_token,
+    generate_verification_code,
     get_current_user,
     hash_password,
     require_admin,
@@ -48,7 +52,7 @@ import models
 import permissions
 import utils
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 ####################
 
@@ -118,12 +122,13 @@ async def register(request: Request, user: models.User):
                     firstname=user.firstname,
                     lastname=user.lastname,
                     email=user.email,
+                    backup_email=user.backup_email,
                 )
             )
         await database.add_user(user)
 
         try:
-            await mails.send_verification_email(delegate)
+            await send_verification_code(delegate)
             return JSONResponse(
                 status_code=201,
                 content={
@@ -143,6 +148,7 @@ async def register(request: Request, user: models.User):
     response_model=models.Token,
     responses={
         401: {"model": models.ErrorResponse},
+        403: {"model": models.ErrorResponse},
         500: {"model": models.ErrorResponse},
     },
 )
@@ -156,6 +162,11 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         raise HTTPException(status_code=401, detail="Invalid email")
     if not await asyncio.to_thread(verify_password, password, user.password):
         raise HTTPException(status_code=401, detail="Invalid password")
+    # No token until the email is verified: the app sends them to the code screen instead.
+    # (Checked after the password so this does not reveal which emails are registered.)
+    account = await database.get_auth_user(user.email)
+    if account is not None and not account.verified:
+        raise HTTPException(status_code=403, detail="Please verify your email!")
 
     # user_type keeps the two values the app already understands; "oc" reports as "user".
     user_type = "admin" if await database.get_role(user.email) == "admin" else "user"
@@ -166,24 +177,67 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
     return models.Token(access_token=access_token, token_type="bearer", user_type=user_type)
 
 
-@app.get(
+async def send_verification_code(delegate: models.Delegate) -> None:
+    """Generate a fresh 6-digit code, store it, and email it to the delegate (and their
+    backup email, if set). Used by register, mumbaimun/register and resend."""
+    code = generate_verification_code()
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.verification_code_expire_minutes
+    )
+    await database.set_verification_code(delegate.email, code, expires_at)
+    if settings.mail_server in ("localhost", "127.0.0.1"):
+        # Local development has no mail server to deliver the email, so show the code here.
+        logging.getLogger("uvicorn.error").warning(
+            "DEV ONLY (MAIL_SERVER is localhost): verification code for %s is %s",
+            delegate.email,
+            code,
+        )
+    await mails.send_verification_email(delegate, code)
+
+
+async def _send_code_if_unverified(delegate: models.Delegate) -> bool:
+    """Email a fresh code to a delegate who still has to verify. Returns whether one was
+    sent; a mail failure is logged and reported, not raised, so sign-up still succeeds."""
+    if delegate.verified:
+        return False
+    try:
+        await send_verification_code(delegate)
+        return True
+    except Exception:
+        logging.getLogger("uvicorn.error").exception(
+            "Could not send the verification code to %s", delegate.email
+        )
+        return False
+
+
+@app.post(
     "/verify_email",
     tags=["Auth"],
     status_code=200,
-    responses={500: {"model": models.ErrorResponse}},
+    responses={
+        400: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        429: {"model": models.ErrorResponse},
+    },
 )
 @limiter.limit("10/minute")
-async def verify_email(request: Request, token: str):
-    try:
-        delegate = await check_verification_token(token)
-        if type(delegate) != models.Delegate:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        await database.verify_delegate_email(delegate.email)
+async def verify_email(request: Request, body: models.VerifyEmail):
+    """Verify an email with the 6-digit code that was sent to it."""
+    status = await database.check_verification_code(
+        body.email, body.code, settings.verification_code_max_attempts
+    )
+    if status == "ok":
+        await database.verify_delegate_email(body.email)
         # A rostered OC member becomes a team member the moment they finish signing up.
-        await database.apply_pending_invites(delegate.email)
+        await database.apply_pending_invites(body.email)
         return JSONResponse(status_code=200, content={"message": "Email verified!"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if status == "none":
+        raise HTTPException(status_code=404, detail="No verification pending for this email")
+    if status == "expired":
+        raise HTTPException(status_code=400, detail="Code expired, request a new one")
+    if status == "too_many":
+        raise HTTPException(status_code=429, detail="Too many attempts, request a new code")
+    raise HTTPException(status_code=400, detail="Invalid code")
 
 
 @app.get(
@@ -203,10 +257,12 @@ async def resend_verification_email(request: Request, email: models.EmailStr):
             raise HTTPException(status_code=404, detail="Delegate not found")
         if delegate.verified:
             raise HTTPException(status_code=409, detail="Email already verified")
-        await mails.send_verification_email(delegate)
+        await send_verification_code(delegate)
         return JSONResponse(
-            status_code=200, content={"message": "Verification email sent!"}
+            status_code=200, content={"message": "Verification code sent!"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -229,12 +285,17 @@ async def forgot_password(request: Request, email: models.EmailStr):
             raise HTTPException(status_code=404, detail="User not found")
         if not delegate.verified:
             raise HTTPException(status_code=403, detail="User not verified")
-        access_token = create_access_token(data={"sub": delegate.email})
-        link = f"{settings.url}/reset?token={access_token}"
+        user = await database.get_user_by_email(delegate.email)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        reset_token = create_reset_token(delegate.email, user.password)
+        link = f"{settings.url.rstrip('/')}/reset?token={reset_token}"
         await mails.send_password_reset_email(delegate, link)
         return JSONResponse(
             status_code=200, content={"message": "Password reset email sent!"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -272,16 +333,6 @@ async def change_password(
 
 
 @app.get(
-    "/hash_password", tags=["Admin"], responses={500: {"model": models.ErrorResponse}}
-)
-def get_hashed_password(password: str) -> str:
-    try:
-        return hash_password(password)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get(
     "/backup",
     tags=["Admin"],
     response_class=FileResponse,
@@ -314,7 +365,7 @@ async def change_role(
     change: models.RoleChange,
     admin: models.AuthUser = Depends(require_admin),
 ):
-    """Give a user the delegate, oc or admin role. Every change is written to the
+    """Give a user the delegate, eb, oc or admin role. Every change is written to the
     admin_audit table."""
     try:
         old_role = await database.set_role(admin.email, email, change.role)
@@ -406,7 +457,11 @@ async def get_current_delegate(user: models.AuthUser = Depends(get_current_user)
     return models.Me(
         **user.model_dump(),
         is_head=is_head,
-        permissions=sorted(perms),
+        # OC team permissions as before, plus the strings the Delego app gates its screens on
+        # (derived from the role and the team permissions, see permissions.py).
+        permissions=sorted(
+            set(perms) | permissions.app_permissions(user.role, is_head, perms)
+        ),
         teams=memberships,
     )
 
@@ -452,6 +507,7 @@ async def update_delegate(
     user: models.AuthUser = Depends(get_current_user),
     firstname: str = "",
     lastname: str = "",
+    backup_email: str = "",
     contact: str = "",
     dateofbirth: str = "",
     gender: str = "",
@@ -468,6 +524,8 @@ async def update_delegate(
             data.firstname = firstname
         if lastname != "":
             data.lastname = lastname
+        if backup_email != "":
+            data.backup_email = backup_email
         if contact != "":
             data.contact = contact
         if dateofbirth != "":
@@ -488,8 +546,12 @@ async def update_delegate(
 # MUMBAIMUN QR CODES
 
 
-@app.get("/qr", tags=["QR"])
-def get_qr(id: str):
+@app.get("/qr", tags=["QR"], responses={404: {"model": models.ErrorResponse}})
+async def get_qr(id: str):
+    # The id becomes part of a file path, so only a real delegate's id is accepted.
+    # Anything else (including ../ tricks) is a plain 404.
+    if await database.get_delegate_by_id(id) is None:
+        raise HTTPException(status_code=404, detail="Delegate not found")
     try:
         qr_folder = utils.qr_folder
         if not os.path.exists(qr_folder):
@@ -498,7 +560,7 @@ def get_qr(id: str):
         qr_image = f"{qr_folder}/{id}.jpg"
 
         if not os.path.exists(qr_image):
-            utils.generate_qr(id)
+            await asyncio.to_thread(utils.generate_qr, id)
         try:
             return FileResponse(qr_image)
         except Exception as e:
@@ -533,10 +595,6 @@ async def mm_register(request: Request, user: models.User):
                 raise HTTPException(
                     status_code=400, detail="User exists but is not a delegate."
                 )
-            if not delegate.verified:
-                delegate.verified = True
-                await database.update_delegate_by_id(delegate.id, delegate)
-
             mm_delegate = await database.get_mm_delegate_by_email(user.email)
 
             if mm_delegate:
@@ -559,10 +617,13 @@ async def mm_register(request: Request, user: models.User):
                 )
             )
 
+            email_sent = await _send_code_if_unverified(delegate)
             return JSONResponse(
                 status_code=201,
                 content={
-                    "message": f"Mumbai MUN Delegate registered successfully! ID: {mm_delegate.id}"
+                    "message": f"Mumbai MUN Delegate registered successfully! ID: {mm_delegate.id}",
+                    "verified": delegate.verified,
+                    "email_sent": email_sent,
                 },
             )
 
@@ -577,15 +638,12 @@ async def mm_register(request: Request, user: models.User):
                         firstname=user.firstname,
                         lastname=user.lastname,
                         email=user.email,
-                        verified=True,
+                        backup_email=user.backup_email,
+                        verified=False,  # becomes True only when they enter the emailed code
                     )
                 )
 
             await database.add_user(user)
-
-            if not delegate.verified:
-                delegate.verified = True
-                await database.update_delegate_by_id(delegate.id, delegate)
 
             mm_delegate = await database.add_mm_delegate(
                 models.MMDelegate(
@@ -601,17 +659,20 @@ async def mm_register(request: Request, user: models.User):
                 )
             )
 
-            try:
-                await mails.send_verification_email(delegate)
-                return JSONResponse(
-                    status_code=201,
-                    content={
-                        "message": f"User with id {delegate.id} created successfully!"
-                    },
-                )
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            # The account exists but cannot log in until the code is entered. If the email
+            # could not be sent the account is still created; the app offers "Resend code".
+            email_sent = await _send_code_if_unverified(delegate)
+            return JSONResponse(
+                status_code=201,
+                content={
+                    "message": f"User with id {delegate.id} created successfully!",
+                    "verified": delegate.verified,
+                    "email_sent": email_sent,
+                },
+            )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -686,6 +747,35 @@ app.include_router(mm_router)
 
 # Whoever runs the food counter: scans, plate counts and the flagged list.
 require_food = require_permission(permissions.FOOD_MANAGE_ENTITLEMENT)
+# Scanning meals and reading plate counts: any OC member, as well as teams/heads with the
+# food permission. (The flagged-scan list above stays team/head only.)
+require_food_scan = require_permission(
+    permissions.FOOD_MANAGE_ENTITLEMENT, roles=permissions.OC_BASELINE_ROLES
+)
+
+# The app (and older clients) call the third meal "high_tea"; the database says "hitea".
+_MEAL_ALIASES = {"high_tea": "hitea", "high-tea": "hitea", "hightea": "hitea"}
+_DIET_ALIASES = {"nonveg": "non_veg", "non-veg": "non_veg"}
+
+
+def _parse_meal(raw: str) -> str:
+    meal = _MEAL_ALIASES.get(raw.strip().lower(), raw.strip().lower())
+    if meal not in db.MEALS:
+        raise HTTPException(
+            status_code=422, detail="meal must be breakfast, lunch or high_tea"
+        )
+    return meal
+
+
+def _parse_diet(raw: str) -> str | None:
+    """The diet the operator picked. Blank means "use the delegate's registered one"."""
+    diet = raw.strip().lower()
+    if not diet:
+        return None
+    diet = _DIET_ALIASES.get(diet, diet)
+    if diet not in ("veg", "non_veg", "jain"):
+        raise HTTPException(status_code=422, detail="diet must be veg, non_veg or jain")
+    return diet
 
 
 @app.get(
@@ -740,19 +830,29 @@ async def set_food_preference(
 )
 async def scan_meal(
     delegate_id: Annotated[str, Form()],
-    meal: Annotated[models.Meal, Form()],
-    user: models.AuthUser = Depends(require_food),
+    meal: Annotated[str, Form()],
+    diet: Annotated[str, Form()] = "",
+    scanned_at: Annotated[str, Form()] = "",  # sent by the app; the server uses its own clock
+    user: models.AuthUser = Depends(require_food_scan),
 ):
     """Record a delegate collecting a meal. The day is derived from today's date against
-    the event, so the operator only picks the meal. Returns `served`, or `duplicate` (with
-    a 200) when they already collected this meal, which is logged to the flagged list."""
+    the event, so the operator only picks the meal (breakfast, lunch or high_tea) and,
+    optionally, the diet served. Returns `served`, or `duplicate` (with a 200) when they
+    already collected this meal, which is logged to the flagged list."""
+    meal = _parse_meal(meal)
+    diet = _parse_diet(diet)
     try:
-        event_id, day = await database.resolve_current_event_day()
+        event_id, day = await database.resolve_scan_day()
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
         return await database.record_meal_scan(
-            event_id=event_id, day=day, meal=meal, delegate_id=delegate_id, scanned_by=user.email
+            event_id=event_id,
+            day=day,
+            meal=meal,
+            delegate_id=delegate_id,
+            scanned_by=user.email,
+            diet=diet,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -764,10 +864,11 @@ async def scan_meal(
     response_model=models.MealCount,
     responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
 )
-async def plate_count(meal: models.Meal, user: models.AuthUser = Depends(require_food)):
+async def plate_count(meal: str, user: models.AuthUser = Depends(require_food_scan)):
     """The live count of plates served for a meal today, broken down by diet."""
+    meal = _parse_meal(meal)
     try:
-        event_id, day = await database.resolve_current_event_day()
+        event_id, day = await database.resolve_scan_day()
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await database.get_plate_count(event_id, day, meal)
@@ -803,6 +904,18 @@ async def _authorize_roster(user: models.AuthUser, team_id: int) -> None:
     if is_head or await database.is_team_lead(user.email, team_id):
         return
     raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.get(
+    "/events",
+    tags=["OC Admin"],
+    response_model=list[models.Event],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_events(user: models.AuthUser = Depends(require_head)):
+    """The events, oldest first (head/admin). The Delego app reads the event id from here
+    to create and manage the Hospitality team."""
+    return await database.list_events()
 
 
 @app.patch(
@@ -997,6 +1110,24 @@ async def _committee_or_404(committee_id: int) -> models.Committee:
     return committee
 
 
+# The text shown when the app sends a quick action without its own wording.
+_BREAK_TEXT = {
+    "free": "We are free for a break",
+    "late": "Running 5 minutes late",
+    "accept": "Accepted - come down now",
+    "reject": "Rejected - canteen is full",
+}
+
+
+def _message_parts(message: models.NewChatMessage) -> tuple[str, str, dict | None]:
+    """(kind, body, payload) to store. The app's {"type": "free"} shorthand becomes a
+    status message carrying that quick action, with a standard text if none was given."""
+    if message.type is None:
+        return message.kind, message.body, message.payload
+    body = message.body.strip() or _BREAK_TEXT[message.type]
+    return "status", body, {**(message.payload or {}), "type": message.type}
+
+
 async def _committee_access(
     user: models.AuthUser, committee: models.Committee, permission: str
 ) -> bool:
@@ -1004,10 +1135,38 @@ async def _committee_access(
     or head always may; a rapporteur only on their own committee; hospitality on all."""
     if user.role == "admin":
         return True
+    # The OC role is the baseline for break coordination (the Delego app): every OC member
+    # can read and post in every committee. Team scoping below still applies to everyone
+    # else, such as a delegate-role user who was given a rapporteur membership.
+    if user.role in permissions.OC_BASELINE_ROLES and permission in (
+        permissions.CHAT_VIEW,
+        permissions.CHAT_POST,
+    ):
+        return True
     is_head, _, memberships = await database.get_effective_access(user.email)
     return permissions.can_act_on_committee(
         is_head, memberships, permission, committee.name
     )
+
+
+@app.get(
+    "/committees",
+    tags=["Chat"],
+    response_model=list[models.Committee],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_my_committees(user: models.AuthUser = Depends(get_current_user)):
+    """The committees whose chat the caller may read, across events, in creation order.
+    This is the list the Delego app shows (it has no event id to ask with). 403 when the
+    caller can read none, so the app can tell the user they have no access."""
+    visible = [
+        c
+        for c in await database.list_all_committees()
+        if await _committee_access(user, c, permissions.CHAT_VIEW)
+    ]
+    if not visible:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return visible
 
 
 @app.post(
@@ -1095,9 +1254,8 @@ async def post_message(
     committee = await _committee_or_404(committee_id)
     if not await _committee_access(user, committee, permissions.CHAT_POST):
         raise HTTPException(status_code=403, detail="Forbidden")
-    saved = await database.add_chat_message(
-        committee_id, user.email, message.kind, message.body, message.payload
-    )
+    kind, body, payload = _message_parts(message)
+    saved = await database.add_chat_message(committee_id, user.email, kind, body, payload)
     await chat.hub.broadcast(committee_id, saved.model_dump(mode="json"))
     return saved
 
@@ -1148,8 +1306,9 @@ async def committee_chat_ws(websocket: WebSocket, committee_id: int):
             except Exception:
                 await websocket.send_json({"error": "Invalid message"})
                 continue
+            kind, body, payload = _message_parts(incoming)
             saved = await database.add_chat_message(
-                committee_id, user.email, incoming.kind, incoming.body, incoming.payload
+                committee_id, user.email, kind, body, payload
             )
             await chat.hub.broadcast(committee_id, saved.model_dump(mode="json"))
     except WebSocketDisconnect:
@@ -1230,12 +1389,35 @@ async def delete_user(user: models.AuthUser = Depends(get_current_user)):
 )
 async def serve_reset_html(request: Request, token: str):
     try:
-        user = await get_current_user(token)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return templates.TemplateResponse(request, "reset.html")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        await verify_reset_token(token)
+    except HTTPException as e:
+        return templates.TemplateResponse(
+            request, "reset.html", {"invalid": True}, status_code=e.status_code
+        )
+    return templates.TemplateResponse(request, "reset.html", {"invalid": False})
+
+
+@app.post(
+    "/reset_password",
+    tags=["Auth"],
+    responses={
+        400: {"model": models.ErrorResponse},
+        422: {"model": models.ErrorResponse},
+    },
+)
+@limiter.limit("5/minute")
+async def reset_password(
+    request: Request,
+    body: models.ResetPassword,
+    token: str = Depends(oauth2_scheme),
+):
+    """Set a new password using the token from the reset email (as a Bearer token).
+    The token expires after a short time and stops working once the password changes."""
+    user = await verify_reset_token(token)
+    await database.change_user_pass(
+        user.email, await asyncio.to_thread(hash_password, body.password)
+    )
+    return JSONResponse(status_code=200, content={"message": "Password changed!"})
 
 
 ###############################################

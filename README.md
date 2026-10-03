@@ -6,7 +6,7 @@
 
 | Environment | Branch | Documentation URL                        |
 | -------------| --------| ------------------------------------------|
-| PROD        | main   | https://mundra.munsocietympstme.com/docs |
+| PROD        | master | https://mundra.onrender.com/docs         |
 
 This backend is used by the Delego app will be available at
 AppStore and PlayStore soon.
@@ -171,20 +171,20 @@ This backend is built with FastAPI to handle authentication, delegate management
 ### Auth Routes
 
  1. `POST /register`: Register a new user (creates Delegate if needed).
- 2. `POST /login`: Obtain JWT with email + password.
- 3. `GET /verify_email`: Verifies email with token.
- 4. `GET /resend_verification`: Resend verification email.
+ 2. `POST /login`: Obtain JWT with email + password. An account whose email is not verified
+    yet gets `403 "Please verify your email!"` and no token.
+ 3. `POST /verify_email`: Verify the email with the 6-digit code (`{"email", "code"}`).
+ 4. `GET /resend_verification`: Email a new 6-digit code.
  5. `GET /forgot_password`: Send password reset email.
  6. `PATCH /change_pass`: Change an authenticated delegate’s password.
  7. `DELETE /account`: Delete an authenticated delegate’s account.
 
 ### Admin Routes
 
- 1. `GET /hash_password`: Hashes the provided password (utility).
- 2. `GET /backup`: Runs `pg_dump` and returns the dump (admin only).
- 3. `GET /delegates`: Lists all delegates in JSON or CSV (admin only).
- 4. `POST /manual_verify`: Manually verify a delegate's email (any OC member).
- 5. `PATCH /admin/users/{email}/role`: Set a user's role (admin only, audited).
+ 1. `GET /backup`: Runs `pg_dump` and returns the dump (admin only).
+ 2. `GET /delegates`: Lists all delegates in JSON or CSV (admin only).
+ 3. `POST /manual_verify`: Manually verify a delegate's email (any OC member).
+ 4. `PATCH /admin/users/{email}/role`: Set a user's role to delegate, eb, oc or admin (admin only, audited).
 
 ### Delegate Routes
 
@@ -195,7 +195,11 @@ This backend is built with FastAPI to handle authentication, delegate management
 
 ### Mumbai MUN Routes
 
- 1. `POST /mumbaimun/register`: Register user as Mumbai MUN delegate.
+ 1. `POST /mumbaimun/register`: Register user as Mumbai MUN delegate. The account starts
+    unverified and a 6-digit code is emailed; it cannot log in until `POST /verify_email`
+    accepts the code. The response reports `verified` and `email_sent` (if the email could
+    not be sent the account is still created and the app offers "Send a new code").
+    With `MAIL_SERVER=localhost` (local development) the code is printed in the server log.
  2. `GET /mumbaimun/delegates`: Returns all MM delegates in JSON or CSV (admin only).
  3. `GET /mumbaimun/delegates/me`: The caller's own MM details (name, food preference).
  4. `PATCH /mumbaimun/delegates/{id}/food_preference`: Set a delegate's diet (self, or
@@ -208,15 +212,19 @@ This backend is built with FastAPI to handle authentication, delegate management
 
 ### Food Routes (docs/adr/0003)
 
- 1. `POST /food/scans`: Record a delegate collecting a meal. The day is derived from the
-    date; a second scan of the same meal returns `duplicate` and is flagged.
-    Needs `food.manage_entitlement`.
- 2. `GET /food/plate_count`: Live plate count for a meal today, by diet.
- 3. `GET /food/flags`: Rejected second-scans (who tried for seconds).
+ 1. `POST /food/scans`: Record a delegate collecting a meal (form fields `delegate_id`,
+    `meal`, optional `diet`; `scanned_at` is accepted and ignored). The day is derived from
+    the date; a second scan of the same meal returns `duplicate` and is flagged.
+    Needs `food.manage_entitlement` (or the `oc` role, see "Delego app contract").
+    `meal` is `breakfast`, `lunch` or `hitea`; `high_tea` is accepted as an alias.
+ 2. `GET /food/plate_count`: Live plate count for a meal today, by diet (the diet the
+    operator picked at the scanner, else the delegate's registered preference).
+ 3. `GET /food/flags`: Rejected second-scans (who tried for seconds). Teams/heads only.
 
 ### OC Admin Routes (docs/adr/0003)
 
- 1. `PATCH /events/{id}`: Set an event's start/end dates (head/admin).
+ 1. `GET /events`: List events (head/admin). `PATCH /events/{id}`: Set an event's
+    start/end dates (head/admin).
  2. `GET /events/{id}/teams`: List an event's teams (any OC).
  3. `POST /events/{id}/teams`: Create a team with permissions (`team.manage_definition`).
  4. `PATCH /teams/{id}/permissions`: Replace a team's permissions (`team.manage_definition`).
@@ -232,6 +240,8 @@ This backend is built with FastAPI to handle authentication, delegate management
  1. `POST /events/{id}/committees`: Create a committee (head/admin).
  2. `GET /events/{id}/committees`: List committees and their session status (any user; a
     delegate can check whether their own committee has broken for a meal).
+    `GET /committees`: the committees the caller may read, across events, in creation
+    order (403 if none). This is the list the Delego app uses.
  3. `PATCH /committees/{id}/status`: Set `in_session`/`adjourned` (that committee's
     rapporteur, or head/admin).
  4. `GET|POST /committees/{id}/messages`: Read history / send a message. A committee's
@@ -241,6 +251,39 @@ This backend is built with FastAPI to handle authentication, delegate management
     first frame, then `NewChatMessage` frames. Fan-out is in-process (single uvicorn
     worker); Postgres holds the durable history. See `chat.py` for the swap-in point if the
     app is ever scaled to multiple processes.
+
+## Delego app contract
+
+The Delego mobile app was built against these behaviours, and `tests/test_app_contract.py`
+replays its exact requests. They sit on top of the OC model above without replacing it.
+
+- **Screens follow `GET /delegates/me` → `permissions`.** Besides the team permissions
+  above, it lists the strings the app gates screens on, derived from the role (and team
+  permissions) in `permissions.py`:
+
+  | Role | App permissions |
+  | --- | --- |
+  | `delegate` | `guides.view`, `badge.view` |
+  | `eb` | `guides.view`, `badge.view`, `eb.tools` |
+  | `oc` | `eb.tools`, `food.scan`, `chat.view`, `chat.send_request`, `chat.respond` |
+  | `admin` | all of the above plus `admin.roles` |
+
+  A team member or head also gets `food.scan` / `chat.*` from the matching team
+  permission. These strings only decide what the app shows; the server checks the real
+  permission on every route.
+- **The `oc` role is the baseline for meal scanning and break coordination.** An OC
+  member can scan meals, read plate counts and use every committee's chat without being
+  on a team. Teams and heads still work as before, and `/food/flags` stays team/head only.
+- **Meal scanning works without event dates.** If no event's dates cover today, the scan
+  is filed under the first event with the calendar date as its day key, so "once per meal
+  per day" holds on any day. Set the dates with `PATCH /events/{id}` to get day 1, 2, 3.
+- **Break requests.** `POST /committees/{id}/messages` accepts `{"type": "free" | "late" |
+  "accept" | "reject"}`, stored as a `status` message with that quick action in its
+  payload and a standard text if no body is sent. Messages carry the aliases `sender`
+  (the sender's email) and `type`, next to the upstream fields. The eight committees
+  (UNSC, CCC, PSC, WTO, UNODC, UNICEF, ECOSOC, IPC) are seeded into the first event.
+- **Roles.** `eb` (executive board) is a fourth role, assignable with
+  `PATCH /admin/users/{email}/role`.
 
 ## Roles, teams and permissions
 

@@ -1,16 +1,39 @@
+import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
+
+import httpx
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
-from auth import create_verification_token, generate_password, hash_password, VERIFICATION_TOKEN_EXPIRE_MINUTES
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from auth import VERIFICATION_CODE_EXPIRE_MINUTES
 import config,database, models
 
 settings = config.get_settings()
 
-template_dir = os.path.join(os.path.dirname(__file__), "email_templates") 
-url = settings.url
+template_dir = os.path.join(os.path.dirname(__file__), "email_templates")
+_jinja = Environment(
+    loader=FileSystemLoader(template_dir), autoescape=select_autoescape(["html"])
+)
+url = settings.url.rstrip("/")
 tech_email = settings.tech_email
 support_email = settings.support_email
 logo_url = url + "/static/logo.jpg"
+if "localhost" in url or "127.0.0.1" in url:
+    logging.getLogger("uvicorn.error").warning(
+        "URL is %s: reset links and the logo in emails will not load for recipients. "
+        "Set URL to the public https address of this API.", url,
+    )
+
+
+def _recipients(delegate: models.Delegate) -> list[str]:
+    """The delegate's email, plus their backup email if they set one."""
+    emails = [delegate.email]
+    backup = getattr(delegate, "backup_email", "")
+    if backup and backup != delegate.email:
+        emails.append(backup)
+    return emails
 
 conf = ConnectionConfig(
     MAIL_USERNAME=settings.mail_username,
@@ -26,28 +49,46 @@ conf = ConnectionConfig(
     TEMPLATE_FOLDER=Path(template_dir),
 )
 
-async def send_verification_email(delegate: models.Delegate) -> None:
+async def _send(subject: str, recipients: list[str], template_name: str, context: dict) -> None:
+    """Render the template and send it. Prefers Brevo's HTTPS API (works on hosts that
+    block SMTP, such as Render); falls back to SMTP when no API key is configured."""
+    html = _jinja.get_template(template_name).render(year=datetime.now(timezone.utc).year, **context)
+    if settings.brevo_api_key:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": settings.brevo_api_key,
+                    "accept": "application/json",
+                    "content-type": "application/json",
+                },
+                json={
+                    "sender": {"email": settings.mail_from, "name": settings.mail_from_name},
+                    "to": [{"email": e} for e in recipients],
+                    "subject": subject,
+                    "htmlContent": html,
+                },
+            )
+            resp.raise_for_status()
+    else:
+        message = MessageSchema(
+            subject=subject, recipients=recipients, body=html, subtype=MessageType.html
+        )
+        await FastMail(conf).send_message(message)
 
-    token = create_verification_token(data={"sub": delegate.email})
-    link = f"{url}/verify_email?token={token}"
-    expiration = VERIFICATION_TOKEN_EXPIRE_MINUTES // 60
 
-    message = MessageSchema(
-        subject="Verify your email - MUNSociety MPSTME",
-        recipients=[delegate.email],
-        template_body={"logo_url": logo_url, "firstname": delegate.firstname, "verification_url": link, "expiry": expiration, "support_email": support_email, "tech_email": tech_email},
-        subtype=MessageType.html,
+async def send_verification_email(delegate: models.Delegate, code: str) -> None:
+    await _send(
+        "Verify your email - MUNSociety MPSTME",
+        _recipients(delegate),
+        "email_verification.html",
+        {"logo_url": logo_url, "firstname": delegate.firstname, "code": code, "expiry": VERIFICATION_CODE_EXPIRE_MINUTES, "support_email": support_email, "tech_email": tech_email},
     )
-    fm = FastMail(conf)
-    await fm.send_message(message, template_name="email_verification.html")
 
 async def send_password_reset_email(delegate: models.Delegate, link: str) -> None:
-
-    message = MessageSchema(
-        subject="Reset your password - MUNSociety MPSTME",
-        recipients=[delegate.email],
-        template_body={"logo_url": logo_url, "firstname": delegate.firstname, "link": link, "support_email": support_email, "tech_email": tech_email},
-        subtype=MessageType.html,
+    await _send(
+        "Reset your password - MUNSociety MPSTME",
+        _recipients(delegate),
+        "password_reset.html",
+        {"logo_url": logo_url, "firstname": delegate.firstname, "link": link, "support_email": support_email, "tech_email": tech_email},
     )
-    fm = FastMail(conf)
-    await fm.send_message(message, template_name="password_reset.html")

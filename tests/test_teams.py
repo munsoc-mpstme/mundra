@@ -204,7 +204,12 @@ def test_me_exposes_teams_and_permissions(client):
     assert res.status_code == 200
     body = res.json()
     assert body["is_head"] is False
-    assert body["permissions"] == [permissions.FOOD_MANAGE_ENTITLEMENT]
+    # The team's own permission, plus the strings the Delego app gates screens on: this
+    # delegate-role member gets the delegate screens and, from the team, the scanner.
+    assert body["permissions"] == sorted(
+        {permissions.FOOD_MANAGE_ENTITLEMENT, permissions.APP_FOOD_SCAN}
+        | permissions.APP_ROLE_PERMISSIONS["delegate"]
+    )
     assert body["teams"] == [
         {
             "team": "Hospitality",
@@ -222,7 +227,8 @@ def test_me_still_works_for_a_plain_delegate(client):
     body = res.json()
     assert body["email"] == email
     assert body["is_head"] is False
-    assert body["permissions"] == []
+    # No team permissions; only the app's delegate screens (study guides, QR badge).
+    assert body["permissions"] == sorted(permissions.APP_ROLE_PERMISSIONS["delegate"])
     assert body["teams"] == []
 
 

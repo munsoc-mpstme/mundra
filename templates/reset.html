@@ -166,6 +166,11 @@
 
 <body>
     <div class="container">
+        {% if invalid %}
+        <h1>Link expired</h1>
+        <p class="support-text">This reset link is invalid, has expired, or has already been used.<br>
+            Request a new one from the app's "Forgot password" screen.</p>
+        {% else %}
         <h1>Reset Your Password</h1>
 
         <form id="change-password-form">
@@ -190,10 +195,13 @@
 
             <button type="submit" class="button">Update Password</button>
         </form>
+        <div class="error-message" id="form-message"></div>
+        {% endif %}
         <p class="support-text">Having trouble? <a href="mailto:technology@munsocietympstme.com" target="_blank"
                 title="Get Help">Get Help</a></p>
     </div>
 
+    {% if not invalid %}
     <script>
         function checkPasswordStrength(password) {
             const strengthBar = document.getElementById('strength-bar');
@@ -248,8 +256,8 @@
                 isValid = false;
             }
 
-            if (password.length < 6) {
-                passwordError.textContent = 'Password must be at least 6 characters long.';
+            if (password.length < 8) {
+                passwordError.textContent = 'Password must be at least 8 characters long.';
                 isValid = false;
             }
 
@@ -261,35 +269,43 @@
             const token = urlParams.get('token');
 
             if (!token) {
-                alert('Invalid token!');
+                document.getElementById('form-message').textContent = 'Invalid reset link.';
                 return;
             }
 
-            const payload = {
-                password: password
-            };
+            const message = document.getElementById('form-message');
+            const button = event.target.querySelector('button');
+            button.disabled = true;
+            message.style.color = '';
+            message.textContent = '';
 
-            fetch(`/change_pass?password=${password}`, {
-                method: 'PATCH',
+            fetch('/reset_password', {
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': 'Bearer ' + token
-                }
+                },
+                body: JSON.stringify({ password: password })
             })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
+                .then(async response => {
+                    const data = await response.json().catch(() => ({}));
+                    if (response.ok) {
+                        event.target.style.display = 'none';
+                        message.style.color = 'var(--success-color)';
+                        message.textContent = 'Password changed! You can now log in with your new password.';
                     } else {
-                        alert('An error occurred while changing your password.');
+                        button.disabled = false;
+                        const detail = Array.isArray(data.detail) ? data.detail[0].msg : data.detail;
+                        message.textContent = detail || data.error || 'Could not change your password.';
                     }
                 })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while changing your password.');
+                .catch(() => {
+                    button.disabled = false;
+                    message.textContent = 'An error occurred while changing your password.';
                 });
         });
     </script>
+    {% endif %}
 </body>
 
 </html>

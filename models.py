@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 
-Role = Literal["delegate", "oc", "admin"]
+Role = Literal["delegate", "eb", "oc", "admin"]
 
 
 class Token(BaseModel):
@@ -27,6 +27,7 @@ class newDelegate(BaseModel):
     firstname: str
     lastname: str
     email: EmailStr
+    backup_email: str = ""
     contact: str = ""
     dateofbirth: str = ""
     gender: str = ""
@@ -46,6 +47,11 @@ class AuthUser(Delegate):
 
 class RoleChange(BaseModel):
     role: Role
+
+
+class VerifyEmail(BaseModel):
+    email: EmailStr
+    code: str
 
 
 # ORGANIZING COMMITTEE (docs/adr/0003)
@@ -145,10 +151,18 @@ class CommitteeStatusChange(BaseModel):
     status: CommitteeStatus
 
 
+# The quick actions the Delego app sends for break coordination. They are stored as a
+# `status` message whose payload is {"type": <one of these>}.
+BreakAction = Literal["free", "late", "accept", "reject"]
+
+
 class NewChatMessage(BaseModel):
     kind: ChatKind = "text"
     body: str = ""
     payload: dict | None = None
+    # Shorthand used by the app: {"type": "free"} means a status message carrying that
+    # quick action, with a standard text if no body is given.
+    type: BreakAction | None = None
 
 
 class ChatMessage(BaseModel):
@@ -160,12 +174,34 @@ class ChatMessage(BaseModel):
     body: str = ""
     payload: dict | None = None
     created_at: datetime
+    # Aliases the Delego app reads: `sender` is sender_email, and `type` is the quick
+    # action for a status message (free, late, accept, reject), otherwise the kind.
+    sender: str = ""
+    type: str = "text"
+
+    @model_validator(mode="after")
+    def _fill_app_fields(self):
+        self.sender = self.sender_email
+        action = (self.payload or {}).get("type") if self.kind == "status" else None
+        self.type = action if isinstance(action, str) and action else self.kind
+        return self
 
 
 class User(BaseModel):
     firstname: str
     lastname: str
     email: EmailStr
+    backup_email: str = ""
+    password: str
+
+    @field_validator("password")
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
+
+class ResetPassword(BaseModel):
     password: str
 
     @field_validator("password")
@@ -204,6 +240,8 @@ class ScanResult(BaseModel):
     food_preference: FoodPreference | None = None
     day: int
     meal: Meal
+    # The diet the operator served (falls back to the delegate's registered preference).
+    diet: str | None = None
 
 
 class MealCount(BaseModel):

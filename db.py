@@ -23,7 +23,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 import config
 import permissions
 
-ROLES = ("delegate", "oc", "admin")
+ROLES = ("delegate", "eb", "oc", "admin")
 
 # The three meals served on each conference day, and the diet a plate is prepared for.
 MEALS = ("breakfast", "lunch", "hitea")
@@ -81,6 +81,8 @@ class DelegateRow(Base):
     firstname: Mapped[str]
     lastname: Mapped[str]
     email: Mapped[str] = mapped_column(unique=True)
+    # Optional secondary email; verification and reset mails are also sent here.
+    backup_email: Mapped[str] = mapped_column(server_default="")
     contact: Mapped[str] = mapped_column(server_default="")
     dateofbirth: Mapped[str] = mapped_column(server_default="")
     gender: Mapped[str] = mapped_column(server_default="")
@@ -114,6 +116,23 @@ class UserRow(Base):
     )
     password: Mapped[str]
     role: Mapped[str] = mapped_column(server_default="delegate")
+    created_at: Mapped[datetime] = _created_at()
+
+
+class EmailVerificationRow(Base):
+    """A pending 6-digit email verification code: one per email, replaced on resend and
+    deleted once used. Short-lived and attempt-capped (see config), so the plain code is
+    stored directly rather than hashed."""
+
+    __tablename__ = "email_verifications"
+
+    email: Mapped[str] = mapped_column(
+        ForeignKey("delegates.email", onupdate="CASCADE", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    code: Mapped[str]
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(server_default=text("0"))
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -335,6 +354,9 @@ class MealScanRow(Base):
     day: Mapped[int]
     meal: Mapped[str]
     served_by: Mapped[str]  # email of the OC member who scanned
+    # The diet the operator picked in the scanner. Null for scans made without one, in
+    # which case the delegate's registered preference is used for the plate counts.
+    diet: Mapped[str | None]
     created_at: Mapped[datetime] = _created_at()
 
 

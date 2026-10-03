@@ -14,14 +14,22 @@ class Settings(BaseSettings):
     postgres_db: str = "mundra"
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    verification_token_expire_minutes: int = 120
+    verification_code_expire_minutes: int = 15
+    verification_code_max_attempts: int = 5
     access_token_expire_minutes: int = 720  # 12h: one event day (docs/adr/0003)
+    password_reset_expire_minutes: int = 30
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
-    url: str = "http://localhost:8000"
+    # Public base URL of this API. Used for password-reset links and the logo in emails,
+    # so it must be reachable by the recipient (https://... in production). Defaults to the
+    # deployed server; set URL=http://localhost:8000 in .env for local development.
+    url: str = "https://mundra.onrender.com"
     # Email is sent through Brevo's SMTP relay. MAIL_USERNAME is the Brevo SMTP login
     # (e.g. 8xxxxxx@smtp-brevo.com), MAIL_PASSWORD is a Brevo SMTP key (not the account
     # password), and MAIL_FROM must be a sender/domain verified in Brevo.
+    # Brevo HTTP API key (xkeysib-...). When set, email is sent via Brevo's HTTPS API
+    # instead of SMTP. Required on hosts that block outbound SMTP ports, such as Render.
+    brevo_api_key: str = ""
     mail_username: str = "technology@munsocietympstme.com"
     mail_password: str = ""
     mail_from: str = "technology@munsocietympstme.com"
@@ -32,8 +40,8 @@ class Settings(BaseSettings):
     # and MAIL_SSL_TLS=true.
     mail_starttls: bool = True
     mail_ssl_tls: bool = False
-    docs_url: str | None = None
-    redoc_url: str = "/docs"
+    docs_url: str | None = "/docs"  # Swagger UI
+    redoc_url: str | None = "/redoc"  # ReDoc
 
     model_config = SettingsConfigDict(env_file=".env", populate_by_name=True)
 

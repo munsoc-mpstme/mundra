@@ -1,0 +1,26 @@
+name: Keep Render awake
+
+# Render's free web service sleeps after ~15 minutes of no traffic, and the next request
+# then pays a ~50s cold start. This pings the health endpoint every 10 minutes so the
+# instance stays warm. Set the repo variable RENDER_URL to the service URL
+# (Settings > Secrets and variables > Actions > Variables), e.g. https://mundra.onrender.com
+# Note: free Render instances have a monthly hours budget, so keeping one awake 24/7 uses
+# most of it. GitHub may also delay scheduled runs under load; for stricter timing use an
+# external pinger such as UptimeRobot or cron-job.org against the same URL.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the service
+        run: |
+          if [ -z "${{ vars.RENDER_URL }}" ]; then
+            echo "RENDER_URL repo variable is not set; skipping."
+            exit 0
+          fi
+          curl -fsS --max-time 60 --retry 2 "${{ vars.RENDER_URL }}/" && echo "\npinged OK" || echo "ping failed (service may be waking)"

@@ -5,6 +5,7 @@ returns Pydantic models, never ORM rows."""
 import argparse
 import asyncio
 import os
+import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import func, or_, select, update
@@ -45,6 +46,7 @@ def _delegate_fields(row: db.DelegateRow) -> dict:
         firstname=row.firstname,
         lastname=row.lastname,
         email=row.email,
+        backup_email=row.backup_email,
         contact=row.contact,
         dateofbirth=row.dateofbirth,
         gender=row.gender,
@@ -82,6 +84,7 @@ def _apply_delegate(row: db.DelegateRow, delegate: models.Delegate) -> None:
     row.firstname = delegate.firstname
     row.lastname = delegate.lastname
     row.email = delegate.email
+    row.backup_email = delegate.backup_email
     row.contact = delegate.contact
     row.dateofbirth = delegate.dateofbirth
     row.gender = delegate.gender
@@ -242,6 +245,7 @@ async def add_delegate(delegate: models.Delegate) -> models.Delegate:
         firstname=delegate.firstname,
         lastname=delegate.lastname,
         email=delegate.email,
+        backup_email=delegate.backup_email,
         contact=delegate.contact,
         dateofbirth=delegate.dateofbirth,
         gender=delegate.gender,
@@ -297,6 +301,45 @@ async def verify_delegate_email(email: models.EmailStr) -> None:
         await session.execute(
             update(db.DelegateRow).where(db.DelegateRow.email == email).values(verified=True)
         )
+
+
+####################
+# EMAIL VERIFICATION CODES
+####################
+
+
+async def set_verification_code(email: str, code: str, expires_at: datetime) -> None:
+    """Store (or replace) the pending 6-digit code for an email, resetting attempts."""
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.EmailVerificationRow, email)
+        if row is None:
+            session.add(
+                db.EmailVerificationRow(email=email, code=code, expires_at=expires_at)
+            )
+        else:
+            row.code = code
+            row.expires_at = expires_at
+            row.attempts = 0
+
+
+async def check_verification_code(email: str, code: str, max_attempts: int) -> str:
+    """Check a submitted code. Returns one of: 'ok' (and consumes the code), 'invalid'
+    (wrong code, attempt counted), 'expired', 'too_many', or 'none' (no code pending)."""
+    now = datetime.now(timezone.utc)
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.EmailVerificationRow, email, with_for_update=True)
+        if row is None:
+            return "none"
+        if row.expires_at <= now:
+            await session.delete(row)
+            return "expired"
+        if row.attempts >= max_attempts:
+            return "too_many"
+        if secrets.compare_digest(row.code, code):
+            await session.delete(row)
+            return "ok"
+        row.attempts += 1
+        return "invalid"
 
 
 ####################
@@ -512,6 +555,16 @@ async def get_event(event_id: int) -> models.Event | None:
             if row
             else None
         )
+
+
+async def list_events() -> list[models.Event]:
+    """Every event, oldest first. The Delego app uses the first one to manage its teams."""
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(select(db.EventRow).order_by(db.EventRow.id))
+        return [
+            models.Event(id=r.id, name=r.name, starts_at=r.starts_at, ends_at=r.ends_at)
+            for r in rows
+        ]
 
 
 async def set_event_dates(event_id: int, dates: models.EventDates) -> models.Event | None:
@@ -874,8 +927,30 @@ async def resolve_current_event_day(
     raise LookupError("No event is running today; set the event dates first")
 
 
+async def resolve_scan_day(now: datetime | None = None) -> tuple[int, int]:
+    """The (event_id, day) a meal scan belongs to. Normally the event day that contains
+    today. When no event's dates cover today (dates not set yet, or testing before the
+    conference) scanning still works: the scan is filed under the first event with the
+    calendar date as its day key, so "once per meal per day" holds on any day. Those keys
+    are large (a date ordinal), so they can never collide with a real day 1, 2 or 3."""
+    try:
+        return await resolve_current_event_day(now)
+    except LookupError:
+        pass
+    async with db.SessionLocal() as session:
+        event_id = await session.scalar(select(db.EventRow.id).order_by(db.EventRow.id).limit(1))
+    if event_id is None:
+        raise LookupError("No event exists yet")
+    return event_id, (now or datetime.now(timezone.utc)).date().toordinal()
+
+
 async def record_meal_scan(
-    event_id: int, day: int, meal: str, delegate_id: str, scanned_by: str
+    event_id: int,
+    day: int,
+    meal: str,
+    delegate_id: str,
+    scanned_by: str,
+    diet: str | None = None,
 ) -> models.ScanResult:
     """Record that a delegate collected a meal. Inserts a meal_scans row; if they already
     collected this meal the unique constraint rejects it, and we log the attempt to
@@ -904,6 +979,7 @@ async def record_meal_scan(
                 day=day,
                 meal=meal,
                 served_by=scanned_by,
+                diet=diet,
             )
         )
         try:
@@ -930,6 +1006,7 @@ async def record_meal_scan(
         food_preference=preference,
         day=day,
         meal=meal,
+        diet=diet or preference,
     )
 
 
@@ -938,7 +1015,11 @@ async def get_plate_count(event_id: int, day: int, meal: str) -> models.MealCoun
     async with db.SessionLocal() as session:
         rows = (
             await session.execute(
-                select(db.MMDelegateRow.food_preference, func.count())
+                select(
+                    func.coalesce(db.MealScanRow.diet, db.MMDelegateRow.food_preference),
+                    func.count(),
+                )
+                .select_from(db.MMDelegateRow)
                 .join(
                     db.MealScanRow,
                     db.MealScanRow.delegate_id == db.MMDelegateRow.delegate_id,
@@ -948,7 +1029,7 @@ async def get_plate_count(event_id: int, day: int, meal: str) -> models.MealCoun
                     db.MealScanRow.day == day,
                     db.MealScanRow.meal == meal,
                 )
-                .group_by(db.MMDelegateRow.food_preference)
+                .group_by(func.coalesce(db.MealScanRow.diet, db.MMDelegateRow.food_preference))
             )
         ).all()
 
@@ -1016,6 +1097,13 @@ async def create_committee(event_id: int, new: models.NewCommittee) -> models.Co
         session.add(row)
         await session.flush()
         return _to_committee(row)
+
+
+async def list_all_committees() -> list[models.Committee]:
+    """Every committee across events, in the order they were created (the app's order)."""
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(select(db.CommitteeRow).order_by(db.CommitteeRow.id))
+        return [_to_committee(row) for row in rows]
 
 
 async def list_committees(event_id: int) -> list[models.Committee]:
