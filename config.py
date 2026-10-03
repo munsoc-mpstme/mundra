@@ -5,6 +5,12 @@ from sqlalchemy.engine import URL, make_url
 
 class Settings(BaseSettings):
     secret_key: str
+    # Optional bootstrap admin, set in the host's environment (never in the code or repo).
+    # ADMIN_EMAIL alone promotes that existing account to admin on every start. With
+    # ADMIN_PASSWORD too, the account is created if it does not exist yet. An existing
+    # account keeps its own password. See database.ensure_bootstrap_admin.
+    admin_email: str | None = None
+    admin_password: str | None = None
     # A full connection string (e.g. Supabase or Render). When set, it wins over the
     # POSTGRES_* parts below, so a managed host needs only this one variable. Local dev
     # leaves it unset and uses the POSTGRES_* parts with docker-compose.

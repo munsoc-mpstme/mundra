@@ -96,6 +96,12 @@ uv run python database.py make-admin you@example.com
 # in Docker: docker compose exec app python database.py make-admin you@example.com
 ```
 
+**Without a shell (for example a free Render instance):** set `ADMIN_EMAIL` in the host's
+environment settings (never in the code or the repo). On every start the server makes that
+account an admin and verifies it; its password is left alone. If the account does not
+exist yet, also set `ADMIN_PASSWORD` (at least 8 characters) and it is created on the next
+start. Remove `ADMIN_PASSWORD` once the account exists. The password is never logged.
+
 From then on, admins manage roles with `PATCH /admin/users/{email}/role`
 (body: `{"role": "delegate" | "oc" | "admin"}`). Every change is recorded in the
 `admin_audit` table. You cannot change your own role.

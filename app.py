@@ -62,8 +62,36 @@ limiter = Limiter(key_func=get_remote_address)
 
 settings = config.get_settings()
 
+async def bootstrap_admin() -> None:
+    """If ADMIN_EMAIL is set, make that account an admin (see config.py). A problem here is
+    logged and never stops the server from starting. The password is never logged."""
+    log = logging.getLogger("uvicorn.error")
+    email = (settings.admin_email or "").strip()
+    if not email:
+        return
+    try:
+        password_hash = None
+        if settings.admin_password:
+            if len(settings.admin_password) < 8:
+                log.error("ADMIN_PASSWORD must be at least 8 characters; ignoring it.")
+            else:
+                password_hash = await asyncio.to_thread(hash_password, settings.admin_password)
+        outcome = await database.ensure_bootstrap_admin(email, password_hash)
+        if outcome == "missing":
+            log.warning(
+                "ADMIN_EMAIL %s has no account yet. Register it in the app, or also set "
+                "ADMIN_PASSWORD so it is created on the next start.",
+                email,
+            )
+        else:
+            log.info("Bootstrap admin %s: %s", email, outcome)
+    except Exception:
+        log.exception("Could not set up the bootstrap admin %s", email)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await bootstrap_admin()
     yield
     await db.engine.dispose()
 
