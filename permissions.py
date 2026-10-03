@@ -85,10 +85,10 @@ APP_ADMIN_ROLES = "admin.roles"  # change other users' roles
 APP_ROLE_PERMISSIONS = {
     "delegate": frozenset({APP_GUIDES_VIEW, APP_BADGE_VIEW}),
     "eb": frozenset({APP_GUIDES_VIEW, APP_BADGE_VIEW, APP_EB_TOOLS}),
-    # An OC member runs the event rather than attending it, so no guides or badge.
-    "oc": frozenset(
-        {APP_EB_TOOLS, APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST, APP_CHAT_RESPOND}
-    ),
+    # An OC member runs the event rather than attending it, so no guides or badge. They
+    # ask for a break or say they are late; accepting or rejecting is for the Hospitality
+    # team (a team member holding chat.post), not for the OC role.
+    "oc": frozenset({APP_EB_TOOLS, APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST}),
     "admin": frozenset(
         {
             APP_GUIDES_VIEW,
@@ -108,16 +108,50 @@ APP_ROLE_PERMISSIONS = {
 OC_BASELINE_ROLES = ("oc",)
 
 
-def app_permissions(role: str, is_head: bool, team_permissions) -> set[str]:
+# The break-coordination quick actions. Requesting is one side of the conversation,
+# answering the other: the committee side asks, hospitality answers.
+BREAK_REQUEST_ACTIONS = ("free", "late")
+BREAK_RESPONSE_ACTIONS = ("accept", "reject")
+
+
+def app_permissions(role: str, is_head: bool, team_permissions, memberships=()) -> set[str]:
     """The app-facing permission strings for a user: their role's, plus what OC team
-    permissions or being a head add on top."""
+    permissions or being a head add on top. `memberships` are the user's
+    models.Membership objects: chat.post on an unscoped team (hospitality) lets them
+    answer break requests, and on a committee-scoped team (a rapporteur) lets them make
+    requests for that committee."""
     out = set(APP_ROLE_PERMISSIONS.get(role, ()))
     team = set(team_permissions)
-    if is_head or FOOD_MANAGE_ENTITLEMENT in team:
+    if is_head:
+        out.update(
+            {APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST, APP_CHAT_RESPOND}
+        )
+    if FOOD_MANAGE_ENTITLEMENT in team:
         out.add(APP_FOOD_SCAN)
-    if is_head or CHAT_VIEW in team:
+    if CHAT_VIEW in team:
         out.add(APP_CHAT_VIEW)
-    if is_head or CHAT_POST in team:
-        out.update({APP_CHAT_SEND_REQUEST, APP_CHAT_RESPOND})
+    for m in memberships:
+        if CHAT_POST in m.permissions:
+            out.add(APP_CHAT_RESPOND if m.committee is None else APP_CHAT_SEND_REQUEST)
     return out
+
+
+def can_use_break_action(
+    role: str, is_head: bool, memberships, action: str, committee_name: str
+) -> bool:
+    """Whether a user may send this quick action in this committee's chat. Same rule the
+    app uses to show the buttons: admins and heads may send any; the OC role may request
+    (free, late); a committee's own rapporteur may request for that committee; only an
+    unscoped team member with chat.post (hospitality) may accept or reject."""
+    if role == "admin" or is_head:
+        return True
+    if action in BREAK_REQUEST_ACTIONS:
+        if role in OC_BASELINE_ROLES:
+            return True
+        return any(
+            CHAT_POST in m.permissions and m.committee == committee_name for m in memberships
+        )
+    if action in BREAK_RESPONSE_ACTIONS:
+        return any(CHAT_POST in m.permissions and m.committee is None for m in memberships)
+    return True  # not a break action: the ordinary chat.post check applies
 

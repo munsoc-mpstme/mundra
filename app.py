@@ -488,7 +488,8 @@ async def get_current_delegate(user: models.AuthUser = Depends(get_current_user)
         # OC team permissions as before, plus the strings the Delego app gates its screens on
         # (derived from the role and the team permissions, see permissions.py).
         permissions=sorted(
-            set(perms) | permissions.app_permissions(user.role, is_head, perms)
+            set(perms)
+            | permissions.app_permissions(user.role, is_head, perms, memberships)
         ),
         teams=memberships,
     )
@@ -1156,6 +1157,35 @@ def _message_parts(message: models.NewChatMessage) -> tuple[str, str, dict | Non
     return "status", body, {**(message.payload or {}), "type": message.type}
 
 
+def _break_action(message: models.NewChatMessage) -> str | None:
+    """The break quick action a message carries, whether sent as {"type": "accept"} or as
+    a status message with that type in its payload, so it cannot be smuggled past the
+    check by using the generic form."""
+    if message.type is not None:
+        return message.type
+    if message.kind == "status" and isinstance(message.payload, dict):
+        action = message.payload.get("type")
+        if action in permissions.BREAK_REQUEST_ACTIONS + permissions.BREAK_RESPONSE_ACTIONS:
+            return action
+    return None
+
+
+async def _may_send(
+    user: models.AuthUser, committee: models.Committee, message: models.NewChatMessage
+) -> bool:
+    """chat.post in this committee, and for a break quick action also the right side of
+    the conversation (see permissions.can_use_break_action)."""
+    if not await _committee_access(user, committee, permissions.CHAT_POST):
+        return False
+    action = _break_action(message)
+    if action is None:
+        return True
+    is_head, _, memberships = await database.get_effective_access(user.email)
+    return permissions.can_use_break_action(
+        user.role, is_head, memberships, action, committee.name
+    )
+
+
 async def _committee_access(
     user: models.AuthUser, committee: models.Committee, permission: str
 ) -> bool:
@@ -1280,7 +1310,7 @@ async def post_message(
 ):
     """Send a message (REST fallback for the WebSocket). Broadcasts to live subscribers."""
     committee = await _committee_or_404(committee_id)
-    if not await _committee_access(user, committee, permissions.CHAT_POST):
+    if not await _may_send(user, committee, message):
         raise HTTPException(status_code=403, detail="Forbidden")
     kind, body, payload = _message_parts(message)
     saved = await database.add_chat_message(committee_id, user.email, kind, body, payload)
@@ -1333,6 +1363,9 @@ async def committee_chat_ws(websocket: WebSocket, committee_id: int):
                 incoming = models.NewChatMessage(**data)
             except Exception:
                 await websocket.send_json({"error": "Invalid message"})
+                continue
+            if not await _may_send(user, committee, incoming):
+                await websocket.send_json({"error": "You cannot send that here"})
                 continue
             kind, body, payload = _message_parts(incoming)
             saved = await database.add_chat_message(
