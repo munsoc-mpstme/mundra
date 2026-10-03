@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
     # Public base URL of this API. Used for password-reset links and the logo in emails,
-    # so it must be reachable by the recipient (https://... in production).
-    url: str = "http://localhost:8000"
+    # so it must be reachable by the recipient (https://... in production). Defaults to the
+    # deployed server; set URL=http://localhost:8000 in .env for local development.
+    url: str = "https://mundra.onrender.com"
     # Email is sent through Brevo's SMTP relay. MAIL_USERNAME is the Brevo SMTP login
     # (e.g. 8xxxxxx@smtp-brevo.com), MAIL_PASSWORD is a Brevo SMTP key (not the account
     # password), and MAIL_FROM must be a sender/domain verified in Brevo.
