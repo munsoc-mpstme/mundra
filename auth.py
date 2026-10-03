@@ -1,4 +1,4 @@
-import jwt, bcrypt, string, secrets, os
+import jwt, bcrypt, string, secrets, os, hashlib
 from datetime import datetime, timedelta, timezone
 from jwt.exceptions import InvalidTokenError, ExpiredSignatureError
 from fastapi import Depends, HTTPException
@@ -11,20 +11,15 @@ SECRET_KEY = settings.secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 VERIFICATION_CODE_EXPIRE_MINUTES = settings.verification_code_expire_minutes
+PASSWORD_RESET_EXPIRE_MINUTES = settings.password_reset_expire_minutes
+RESET_PURPOSE = "password_reset"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> models.AuthUser:
-    credentials_exception = HTTPException(
-        status_code=403,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def _decode(token: str) -> dict:
+    """Decode and verify a JWT. 401 for an expired token, 403 for any other bad one."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email = payload.get("sub")
-        if email is None:
-            raise credentials_exception
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except ExpiredSignatureError:
         # A distinct 401 so the app can send the user back to the login screen (ADR 0003).
         raise HTTPException(
@@ -33,6 +28,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> models.AuthUs
             headers={"WWW-Authenticate": "Bearer"},
         )
     except InvalidTokenError:
+        raise HTTPException(
+            status_code=403,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> models.AuthUser:
+    credentials_exception = HTTPException(
+        status_code=403,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    payload = _decode(token)
+    email = payload.get("sub")
+    # A password-reset token is not a login token: it may only be used to reset a password.
+    if email is None or payload.get("purpose") is not None:
         raise credentials_exception
     # The role is read from the database on every request, not from the token, so a
     # demotion or a deleted account takes effect immediately.
@@ -41,6 +53,35 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> models.AuthUs
         raise credentials_exception
     if not user.verified:
         raise HTTPException(status_code=401, detail="Please verify your email!")
+    return user
+
+
+def _password_fingerprint(password_hash: str) -> str:
+    return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
+
+
+def create_reset_token(email: str, password_hash: str) -> str:
+    """A short-lived token that can only reset this account's password, once: it is bound
+    to the current password hash, so it stops working as soon as the password changes."""
+    return create_access_token(
+        {"sub": email, "purpose": RESET_PURPOSE, "pwd": _password_fingerprint(password_hash)},
+        timedelta(minutes=PASSWORD_RESET_EXPIRE_MINUTES),
+    )
+
+
+async def verify_reset_token(token: str) -> models.User:
+    """The account a valid, unused reset token belongs to. Raises HTTPException otherwise."""
+    invalid = HTTPException(status_code=400, detail="This reset link is invalid or has expired")
+    try:
+        payload = _decode(token)
+    except HTTPException:
+        raise invalid
+    email = payload.get("sub")
+    if email is None or payload.get("purpose") != RESET_PURPOSE:
+        raise invalid
+    user = await database.get_user_by_email(email)
+    if not user or payload.get("pwd") != _password_fingerprint(user.password):
+        raise invalid
     return user
 
 

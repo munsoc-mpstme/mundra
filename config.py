@@ -17,8 +17,11 @@ class Settings(BaseSettings):
     verification_code_expire_minutes: int = 15
     verification_code_max_attempts: int = 5
     access_token_expire_minutes: int = 720  # 12h: one event day (docs/adr/0003)
+    password_reset_expire_minutes: int = 30
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
+    # Public base URL of this API. Used for password-reset links and the logo in emails,
+    # so it must be reachable by the recipient (https://... in production).
     url: str = "http://localhost:8000"
     # Email is sent through Brevo's SMTP relay. MAIL_USERNAME is the Brevo SMTP login
     # (e.g. 8xxxxxx@smtp-brevo.com), MAIL_PASSWORD is a Brevo SMTP key (not the account

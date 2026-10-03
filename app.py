@@ -28,7 +28,10 @@ from slowapi.util import get_remote_address
 
 from auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    oauth2_scheme,
     create_access_token,
+    create_reset_token,
+    verify_reset_token,
     generate_verification_code,
     get_current_user,
     hash_password,
@@ -253,12 +256,17 @@ async def forgot_password(request: Request, email: models.EmailStr):
             raise HTTPException(status_code=404, detail="User not found")
         if not delegate.verified:
             raise HTTPException(status_code=403, detail="User not verified")
-        access_token = create_access_token(data={"sub": delegate.email})
-        link = f"{settings.url}/reset?token={access_token}"
+        user = await database.get_user_by_email(delegate.email)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        reset_token = create_reset_token(delegate.email, user.password)
+        link = f"{settings.url.rstrip('/')}/reset?token={reset_token}"
         await mails.send_password_reset_email(delegate, link)
         return JSONResponse(
             status_code=200, content={"message": "Password reset email sent!"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1258,12 +1266,35 @@ async def delete_user(user: models.AuthUser = Depends(get_current_user)):
 )
 async def serve_reset_html(request: Request, token: str):
     try:
-        user = await get_current_user(token)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        return templates.TemplateResponse(request, "reset.html")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        await verify_reset_token(token)
+    except HTTPException as e:
+        return templates.TemplateResponse(
+            request, "reset.html", {"invalid": True}, status_code=e.status_code
+        )
+    return templates.TemplateResponse(request, "reset.html", {"invalid": False})
+
+
+@app.post(
+    "/reset_password",
+    tags=["Auth"],
+    responses={
+        400: {"model": models.ErrorResponse},
+        422: {"model": models.ErrorResponse},
+    },
+)
+@limiter.limit("5/minute")
+async def reset_password(
+    request: Request,
+    body: models.ResetPassword,
+    token: str = Depends(oauth2_scheme),
+):
+    """Set a new password using the token from the reset email (as a Bearer token).
+    The token expires after a short time and stops working once the password changes."""
+    user = await verify_reset_token(token)
+    await database.change_user_pass(
+        user.email, await asyncio.to_thread(hash_password, body.password)
+    )
+    return JSONResponse(status_code=200, content={"message": "Password changed!"})
 
 
 ###############################################

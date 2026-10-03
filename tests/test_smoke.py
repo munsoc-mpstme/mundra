@@ -53,10 +53,12 @@ def test_reset_template(client):
     import asyncio
 
     import auth
+    import database
     from helpers import create_user
 
     email = asyncio.run(create_user())
-    token = auth.create_access_token({"sub": email})
+    user = asyncio.run(database.get_user_by_email(email))
+    token = auth.create_reset_token(email, user.password)
     res = client.get("/reset", params={"token": token})
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]

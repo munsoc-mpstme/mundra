@@ -1,4 +1,6 @@
+import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -14,10 +16,15 @@ template_dir = os.path.join(os.path.dirname(__file__), "email_templates")
 _jinja = Environment(
     loader=FileSystemLoader(template_dir), autoescape=select_autoescape(["html"])
 )
-url = settings.url
+url = settings.url.rstrip("/")
 tech_email = settings.tech_email
 support_email = settings.support_email
 logo_url = url + "/static/logo.jpg"
+if "localhost" in url or "127.0.0.1" in url:
+    logging.getLogger("uvicorn.error").warning(
+        "URL is %s: reset links and the logo in emails will not load for recipients. "
+        "Set URL to the public https address of this API.", url,
+    )
 
 
 def _recipients(delegate: models.Delegate) -> list[str]:
@@ -45,7 +52,7 @@ conf = ConnectionConfig(
 async def _send(subject: str, recipients: list[str], template_name: str, context: dict) -> None:
     """Render the template and send it. Prefers Brevo's HTTPS API (works on hosts that
     block SMTP, such as Render); falls back to SMTP when no API key is configured."""
-    html = _jinja.get_template(template_name).render(**context)
+    html = _jinja.get_template(template_name).render(year=datetime.now(timezone.utc).year, **context)
     if settings.brevo_api_key:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
