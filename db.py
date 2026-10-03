@@ -23,7 +23,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 import config
 import permissions
 
-ROLES = ("delegate", "oc", "admin")
+ROLES = ("delegate", "eb", "oc", "admin")
 
 # The three meals served on each conference day, and the diet a plate is prepared for.
 MEALS = ("breakfast", "lunch", "hitea")
@@ -354,6 +354,9 @@ class MealScanRow(Base):
     day: Mapped[int]
     meal: Mapped[str]
     served_by: Mapped[str]  # email of the OC member who scanned
+    # The diet the operator picked in the scanner. Null for scans made without one, in
+    # which case the delegate's registered preference is used for the plate counts.
+    diet: Mapped[str | None]
     created_at: Mapped[datetime] = _created_at()
 
 

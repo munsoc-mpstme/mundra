@@ -304,16 +304,6 @@ async def change_password(
 
 
 @app.get(
-    "/hash_password", tags=["Admin"], responses={500: {"model": models.ErrorResponse}}
-)
-def get_hashed_password(password: str) -> str:
-    try:
-        return hash_password(password)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get(
     "/backup",
     tags=["Admin"],
     response_class=FileResponse,
@@ -346,7 +336,7 @@ async def change_role(
     change: models.RoleChange,
     admin: models.AuthUser = Depends(require_admin),
 ):
-    """Give a user the delegate, oc or admin role. Every change is written to the
+    """Give a user the delegate, eb, oc or admin role. Every change is written to the
     admin_audit table."""
     try:
         old_role = await database.set_role(admin.email, email, change.role)
@@ -438,7 +428,11 @@ async def get_current_delegate(user: models.AuthUser = Depends(get_current_user)
     return models.Me(
         **user.model_dump(),
         is_head=is_head,
-        permissions=sorted(perms),
+        # OC team permissions as before, plus the strings the Delego app gates its screens on
+        # (derived from the role and the team permissions, see permissions.py).
+        permissions=sorted(
+            set(perms) | permissions.app_permissions(user.role, is_head, perms)
+        ),
         teams=memberships,
     )
 
@@ -523,8 +517,12 @@ async def update_delegate(
 # MUMBAIMUN QR CODES
 
 
-@app.get("/qr", tags=["QR"])
-def get_qr(id: str):
+@app.get("/qr", tags=["QR"], responses={404: {"model": models.ErrorResponse}})
+async def get_qr(id: str):
+    # The id becomes part of a file path, so only a real delegate's id is accepted.
+    # Anything else (including ../ tricks) is a plain 404.
+    if await database.get_delegate_by_id(id) is None:
+        raise HTTPException(status_code=404, detail="Delegate not found")
     try:
         qr_folder = utils.qr_folder
         if not os.path.exists(qr_folder):
@@ -533,7 +531,7 @@ def get_qr(id: str):
         qr_image = f"{qr_folder}/{id}.jpg"
 
         if not os.path.exists(qr_image):
-            utils.generate_qr(id)
+            await asyncio.to_thread(utils.generate_qr, id)
         try:
             return FileResponse(qr_image)
         except Exception as e:
@@ -722,6 +720,35 @@ app.include_router(mm_router)
 
 # Whoever runs the food counter: scans, plate counts and the flagged list.
 require_food = require_permission(permissions.FOOD_MANAGE_ENTITLEMENT)
+# Scanning meals and reading plate counts: any OC member, as well as teams/heads with the
+# food permission. (The flagged-scan list above stays team/head only.)
+require_food_scan = require_permission(
+    permissions.FOOD_MANAGE_ENTITLEMENT, roles=permissions.OC_BASELINE_ROLES
+)
+
+# The app (and older clients) call the third meal "high_tea"; the database says "hitea".
+_MEAL_ALIASES = {"high_tea": "hitea", "high-tea": "hitea", "hightea": "hitea"}
+_DIET_ALIASES = {"nonveg": "non_veg", "non-veg": "non_veg"}
+
+
+def _parse_meal(raw: str) -> str:
+    meal = _MEAL_ALIASES.get(raw.strip().lower(), raw.strip().lower())
+    if meal not in db.MEALS:
+        raise HTTPException(
+            status_code=422, detail="meal must be breakfast, lunch or high_tea"
+        )
+    return meal
+
+
+def _parse_diet(raw: str) -> str | None:
+    """The diet the operator picked. Blank means "use the delegate's registered one"."""
+    diet = raw.strip().lower()
+    if not diet:
+        return None
+    diet = _DIET_ALIASES.get(diet, diet)
+    if diet not in ("veg", "non_veg", "jain"):
+        raise HTTPException(status_code=422, detail="diet must be veg, non_veg or jain")
+    return diet
 
 
 @app.get(
@@ -776,19 +803,29 @@ async def set_food_preference(
 )
 async def scan_meal(
     delegate_id: Annotated[str, Form()],
-    meal: Annotated[models.Meal, Form()],
-    user: models.AuthUser = Depends(require_food),
+    meal: Annotated[str, Form()],
+    diet: Annotated[str, Form()] = "",
+    scanned_at: Annotated[str, Form()] = "",  # sent by the app; the server uses its own clock
+    user: models.AuthUser = Depends(require_food_scan),
 ):
     """Record a delegate collecting a meal. The day is derived from today's date against
-    the event, so the operator only picks the meal. Returns `served`, or `duplicate` (with
-    a 200) when they already collected this meal, which is logged to the flagged list."""
+    the event, so the operator only picks the meal (breakfast, lunch or high_tea) and,
+    optionally, the diet served. Returns `served`, or `duplicate` (with a 200) when they
+    already collected this meal, which is logged to the flagged list."""
+    meal = _parse_meal(meal)
+    diet = _parse_diet(diet)
     try:
-        event_id, day = await database.resolve_current_event_day()
+        event_id, day = await database.resolve_scan_day()
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
         return await database.record_meal_scan(
-            event_id=event_id, day=day, meal=meal, delegate_id=delegate_id, scanned_by=user.email
+            event_id=event_id,
+            day=day,
+            meal=meal,
+            delegate_id=delegate_id,
+            scanned_by=user.email,
+            diet=diet,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -800,10 +837,11 @@ async def scan_meal(
     response_model=models.MealCount,
     responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
 )
-async def plate_count(meal: models.Meal, user: models.AuthUser = Depends(require_food)):
+async def plate_count(meal: str, user: models.AuthUser = Depends(require_food_scan)):
     """The live count of plates served for a meal today, broken down by diet."""
+    meal = _parse_meal(meal)
     try:
-        event_id, day = await database.resolve_current_event_day()
+        event_id, day = await database.resolve_scan_day()
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await database.get_plate_count(event_id, day, meal)
@@ -839,6 +877,18 @@ async def _authorize_roster(user: models.AuthUser, team_id: int) -> None:
     if is_head or await database.is_team_lead(user.email, team_id):
         return
     raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.get(
+    "/events",
+    tags=["OC Admin"],
+    response_model=list[models.Event],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_events(user: models.AuthUser = Depends(require_head)):
+    """The events, oldest first (head/admin). The Delego app reads the event id from here
+    to create and manage the Hospitality team."""
+    return await database.list_events()
 
 
 @app.patch(
@@ -1033,6 +1083,24 @@ async def _committee_or_404(committee_id: int) -> models.Committee:
     return committee
 
 
+# The text shown when the app sends a quick action without its own wording.
+_BREAK_TEXT = {
+    "free": "We are free for a break",
+    "late": "Running 5 minutes late",
+    "accept": "Accepted - come down now",
+    "reject": "Rejected - canteen is full",
+}
+
+
+def _message_parts(message: models.NewChatMessage) -> tuple[str, str, dict | None]:
+    """(kind, body, payload) to store. The app's {"type": "free"} shorthand becomes a
+    status message carrying that quick action, with a standard text if none was given."""
+    if message.type is None:
+        return message.kind, message.body, message.payload
+    body = message.body.strip() or _BREAK_TEXT[message.type]
+    return "status", body, {**(message.payload or {}), "type": message.type}
+
+
 async def _committee_access(
     user: models.AuthUser, committee: models.Committee, permission: str
 ) -> bool:
@@ -1040,10 +1108,38 @@ async def _committee_access(
     or head always may; a rapporteur only on their own committee; hospitality on all."""
     if user.role == "admin":
         return True
+    # The OC role is the baseline for break coordination (the Delego app): every OC member
+    # can read and post in every committee. Team scoping below still applies to everyone
+    # else, such as a delegate-role user who was given a rapporteur membership.
+    if user.role in permissions.OC_BASELINE_ROLES and permission in (
+        permissions.CHAT_VIEW,
+        permissions.CHAT_POST,
+    ):
+        return True
     is_head, _, memberships = await database.get_effective_access(user.email)
     return permissions.can_act_on_committee(
         is_head, memberships, permission, committee.name
     )
+
+
+@app.get(
+    "/committees",
+    tags=["Chat"],
+    response_model=list[models.Committee],
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def list_my_committees(user: models.AuthUser = Depends(get_current_user)):
+    """The committees whose chat the caller may read, across events, in creation order.
+    This is the list the Delego app shows (it has no event id to ask with). 403 when the
+    caller can read none, so the app can tell the user they have no access."""
+    visible = [
+        c
+        for c in await database.list_all_committees()
+        if await _committee_access(user, c, permissions.CHAT_VIEW)
+    ]
+    if not visible:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return visible
 
 
 @app.post(
@@ -1131,9 +1227,8 @@ async def post_message(
     committee = await _committee_or_404(committee_id)
     if not await _committee_access(user, committee, permissions.CHAT_POST):
         raise HTTPException(status_code=403, detail="Forbidden")
-    saved = await database.add_chat_message(
-        committee_id, user.email, message.kind, message.body, message.payload
-    )
+    kind, body, payload = _message_parts(message)
+    saved = await database.add_chat_message(committee_id, user.email, kind, body, payload)
     await chat.hub.broadcast(committee_id, saved.model_dump(mode="json"))
     return saved
 
@@ -1184,8 +1279,9 @@ async def committee_chat_ws(websocket: WebSocket, committee_id: int):
             except Exception:
                 await websocket.send_json({"error": "Invalid message"})
                 continue
+            kind, body, payload = _message_parts(incoming)
             saved = await database.add_chat_message(
-                committee_id, user.email, incoming.kind, incoming.body, incoming.payload
+                committee_id, user.email, kind, body, payload
             )
             await chat.hub.broadcast(committee_id, saved.model_dump(mode="json"))
     except WebSocketDisconnect:

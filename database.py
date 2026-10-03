@@ -557,6 +557,16 @@ async def get_event(event_id: int) -> models.Event | None:
         )
 
 
+async def list_events() -> list[models.Event]:
+    """Every event, oldest first. The Delego app uses the first one to manage its teams."""
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(select(db.EventRow).order_by(db.EventRow.id))
+        return [
+            models.Event(id=r.id, name=r.name, starts_at=r.starts_at, ends_at=r.ends_at)
+            for r in rows
+        ]
+
+
 async def set_event_dates(event_id: int, dates: models.EventDates) -> models.Event | None:
     async with db.SessionLocal() as session, session.begin():
         row = await session.get(db.EventRow, event_id)
@@ -917,8 +927,30 @@ async def resolve_current_event_day(
     raise LookupError("No event is running today; set the event dates first")
 
 
+async def resolve_scan_day(now: datetime | None = None) -> tuple[int, int]:
+    """The (event_id, day) a meal scan belongs to. Normally the event day that contains
+    today. When no event's dates cover today (dates not set yet, or testing before the
+    conference) scanning still works: the scan is filed under the first event with the
+    calendar date as its day key, so "once per meal per day" holds on any day. Those keys
+    are large (a date ordinal), so they can never collide with a real day 1, 2 or 3."""
+    try:
+        return await resolve_current_event_day(now)
+    except LookupError:
+        pass
+    async with db.SessionLocal() as session:
+        event_id = await session.scalar(select(db.EventRow.id).order_by(db.EventRow.id).limit(1))
+    if event_id is None:
+        raise LookupError("No event exists yet")
+    return event_id, (now or datetime.now(timezone.utc)).date().toordinal()
+
+
 async def record_meal_scan(
-    event_id: int, day: int, meal: str, delegate_id: str, scanned_by: str
+    event_id: int,
+    day: int,
+    meal: str,
+    delegate_id: str,
+    scanned_by: str,
+    diet: str | None = None,
 ) -> models.ScanResult:
     """Record that a delegate collected a meal. Inserts a meal_scans row; if they already
     collected this meal the unique constraint rejects it, and we log the attempt to
@@ -947,6 +979,7 @@ async def record_meal_scan(
                 day=day,
                 meal=meal,
                 served_by=scanned_by,
+                diet=diet,
             )
         )
         try:
@@ -973,6 +1006,7 @@ async def record_meal_scan(
         food_preference=preference,
         day=day,
         meal=meal,
+        diet=diet or preference,
     )
 
 
@@ -981,7 +1015,11 @@ async def get_plate_count(event_id: int, day: int, meal: str) -> models.MealCoun
     async with db.SessionLocal() as session:
         rows = (
             await session.execute(
-                select(db.MMDelegateRow.food_preference, func.count())
+                select(
+                    func.coalesce(db.MealScanRow.diet, db.MMDelegateRow.food_preference),
+                    func.count(),
+                )
+                .select_from(db.MMDelegateRow)
                 .join(
                     db.MealScanRow,
                     db.MealScanRow.delegate_id == db.MMDelegateRow.delegate_id,
@@ -991,7 +1029,7 @@ async def get_plate_count(event_id: int, day: int, meal: str) -> models.MealCoun
                     db.MealScanRow.day == day,
                     db.MealScanRow.meal == meal,
                 )
-                .group_by(db.MMDelegateRow.food_preference)
+                .group_by(func.coalesce(db.MealScanRow.diet, db.MMDelegateRow.food_preference))
             )
         ).all()
 
@@ -1059,6 +1097,13 @@ async def create_committee(event_id: int, new: models.NewCommittee) -> models.Co
         session.add(row)
         await session.flush()
         return _to_committee(row)
+
+
+async def list_all_committees() -> list[models.Committee]:
+    """Every committee across events, in the order they were created (the app's order)."""
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(select(db.CommitteeRow).order_by(db.CommitteeRow.id))
+        return [_to_committee(row) for row in rows]
 
 
 async def list_committees(event_id: int) -> list[models.Committee]:

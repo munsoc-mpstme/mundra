@@ -99,15 +99,16 @@ def require_role(*roles: str):
 require_admin = require_role("admin")
 
 
-def require_permission(permission: str):
+def require_permission(permission: str, roles: tuple[str, ...] = ()):
     """Only let a caller who holds this permission through. An admin (the system role,
     ADR 0002) and a head both pass every check; otherwise the permission must come from
-    one of the caller's active team memberships. Read fresh per request (ADR 0003)."""
+    one of the caller's active team memberships. Read fresh per request (ADR 0003).
+    `roles` lists extra roles that pass without a team (e.g. the OC baseline)."""
 
     async def dependency(
         user: models.AuthUser = Depends(get_current_user),
     ) -> models.AuthUser:
-        if user.role == "admin":
+        if user.role == "admin" or user.role in roles:
             return user
         is_head, perms, _ = await database.get_effective_access(user.email)
         if is_head or permission in perms:

@@ -112,11 +112,16 @@ def test_mm_delegates_requires_auth(client, admin_token, mm_delegate):
 
 def test_qr_generation(client, tmp_path, monkeypatch):
     """qrcode 8.2 + Pillow 12: mode-1 image must still save as JPEG."""
+    import asyncio
+
+    import database
     import utils
 
     monkeypatch.setattr(utils, "qr_folder", str(tmp_path))
     monkeypatch.setattr("app.utils.qr_folder", str(tmp_path))
-    res = client.get("/qr", params={"id": "test123"})
+    # /qr only serves a real delegate's id (it becomes part of a file path).
+    delegate = asyncio.run(database.get_delegate_by_email(asyncio.run(create_user())))
+    res = client.get("/qr", params={"id": delegate.id})
     assert res.status_code == 200
     assert res.headers["content-type"] == "image/jpeg"
 
