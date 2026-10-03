@@ -62,3 +62,62 @@ def can_act_on_committee(is_head, memberships, permission: str, committee_name: 
         if permission in m.permissions and (m.committee is None or m.committee == committee_name):
             return True
     return False
+
+# ---------------------------------------------------------------------------------------
+# What the Delego app is told it may do.
+#
+# The app gates its screens on the strings below (GET /delegates/me -> permissions) and
+# never on role names. They are derived, not stored: from the user's role, plus the OC
+# permissions above (so a team member or head also gets what their team grants). The
+# server still enforces the real checks on every route; this only decides what the app
+# shows.
+# ---------------------------------------------------------------------------------------
+
+APP_GUIDES_VIEW = "guides.view"  # study guides
+APP_BADGE_VIEW = "badge.view"  # own food QR badge
+APP_EB_TOOLS = "eb.tools"  # GSL list, session timer
+APP_FOOD_SCAN = "food.scan"  # meal scanner and plate counts
+APP_CHAT_VIEW = "chat.view"  # read break coordination
+APP_CHAT_SEND_REQUEST = "chat.send_request"  # ask for a break, say you are late
+APP_CHAT_RESPOND = "chat.respond"  # accept or reject a break request
+APP_ADMIN_ROLES = "admin.roles"  # change other users' roles
+
+APP_ROLE_PERMISSIONS = {
+    "delegate": frozenset({APP_GUIDES_VIEW, APP_BADGE_VIEW}),
+    "eb": frozenset({APP_GUIDES_VIEW, APP_BADGE_VIEW, APP_EB_TOOLS}),
+    # An OC member runs the event rather than attending it, so no guides or badge.
+    "oc": frozenset(
+        {APP_EB_TOOLS, APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST, APP_CHAT_RESPOND}
+    ),
+    "admin": frozenset(
+        {
+            APP_GUIDES_VIEW,
+            APP_BADGE_VIEW,
+            APP_EB_TOOLS,
+            APP_FOOD_SCAN,
+            APP_CHAT_VIEW,
+            APP_CHAT_SEND_REQUEST,
+            APP_CHAT_RESPOND,
+            APP_ADMIN_ROLES,
+        }
+    ),
+}
+
+# Roles that hold the OC baseline on the server too: they may scan meals and use break
+# coordination without being on a team. (Teams and heads still work as before.)
+OC_BASELINE_ROLES = ("oc",)
+
+
+def app_permissions(role: str, is_head: bool, team_permissions) -> set[str]:
+    """The app-facing permission strings for a user: their role's, plus what OC team
+    permissions or being a head add on top."""
+    out = set(APP_ROLE_PERMISSIONS.get(role, ()))
+    team = set(team_permissions)
+    if is_head or FOOD_MANAGE_ENTITLEMENT in team:
+        out.add(APP_FOOD_SCAN)
+    if is_head or CHAT_VIEW in team:
+        out.add(APP_CHAT_VIEW)
+    if is_head or CHAT_POST in team:
+        out.update({APP_CHAT_SEND_REQUEST, APP_CHAT_RESPOND})
+    return out
+
