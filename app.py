@@ -44,6 +44,7 @@ from auth import (
 )
 from sqlalchemy.exc import IntegrityError
 import chat
+import gsl
 import config
 import database
 import db
@@ -1559,3 +1560,61 @@ def get_schedule():
     """Returns the full event schedule data including day metadata."""
     schedule_data = read_schedule_data()
     return schedule_data
+@app.post("/committees/{committee_id}/gsl", tags=["gsl"])
+async def update_gsl(
+    committee_id: int,
+    gsl_list: list[str],
+    user: Annotated[models.AuthUser, Depends(get_current_user)],
+):
+    committee = await database.get_committee(committee_id)
+    if not committee:
+        raise HTTPException(404, "Committee not found")
+    # For now, allow anyone with EB_TOOLS or CHAT_POST or just checking if they are not delegate.
+    # Actually, lets use CHAT_POST as a placeholder.
+    if not await _committee_access(user, committee, permissions.CHAT_POST):
+        raise HTTPException(403, "Not allowed to update GSL")
+    
+    await gsl.gsl_hub.update_list(committee_id, gsl_list)
+    return {"status": "ok"}
+
+@app.websocket("/ws/committees/{committee_id}/gsl")
+async def committee_gsl_ws(websocket: WebSocket, committee_id: int):
+    await websocket.accept()
+    await gsl.gsl_hub.connect(committee_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await gsl.gsl_hub.disconnect(committee_id, websocket)
+
+
+@app.post("/committees/{committee_id}/gsl", tags=["gsl"])
+async def update_gsl(
+    committee_id: int,
+    gsl_list: list[str],
+    user: Annotated[models.AuthUser, Depends(get_current_user)],
+):
+    committee = await database.get_committee(committee_id)
+    if not committee:
+        raise HTTPException(404, "Committee not found")
+    if not await _committee_access(user, committee, permissions.CHAT_POST):
+        raise HTTPException(403, "Not allowed to update GSL")
+    
+    await gsl.gsl_hub.update_list(committee_id, gsl_list)
+    return {"status": "ok"}
+
+@app.websocket("/ws/committees/{committee_id}/gsl")
+async def committee_gsl_ws(websocket: WebSocket, committee_id: int):
+    await websocket.accept()
+    await gsl.gsl_hub.connect(committee_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await gsl.gsl_hub.disconnect(committee_id, websocket)
+
+@app.get("/public/committees", tags=["gsl"])
+async def public_list_committees():
+    # Return all committees from event 1 for the smartboard
+    return await database.list_committees(1)
+
