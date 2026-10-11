@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mumbai MUN - Speaker's List</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,400;0,600;0,800;0,900;1,700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1c1c1e;
+            --card-border: #2c2c2e;
+            --accent-pink: #FF2BB4;
+            --accent-yellow: #FFF21A;
+            --accent-cyan: #00E5FF;
+            --text-main: #FFFFFF;
+            --text-sub: #8E8E93;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: "Rubik", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            padding: 1.25rem 2rem;
+        }
+
+        /* Header section */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.85rem 1.75rem;
+            background: #18181a;
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            margin-bottom: 1.5rem;
+            gap: 1.5rem;
+        }
+
+        .brand-section {
+            display: flex;
+            align-items: center;
+            gap: 1.15rem;
+        }
+
+        .brand-logo {
+            width: 52px;
+            height: 52px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 6px rgba(255, 43, 180, 0.4));
+            border-radius: 10px;
+        }
+
+        .brand-title {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand-title h1 {
+            font-size: 1.75rem;
+            font-weight: 900;
+            letter-spacing: 1.2px;
+            color: var(--accent-pink);
+            text-shadow: 0 0 12px rgba(255, 43, 180, 0.4);
+            text-transform: uppercase;
+        }
+
+        .brand-title span {
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: var(--text-sub);
+            text-transform: uppercase;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .select-wrapper {
+            position: relative;
+        }
+
+        select {
+            appearance: none;
+            background: #242426;
+            color: #FFF21A;
+            border: 1.5px solid var(--card-border);
+            border-radius: 10px;
+            padding: 0.6rem 2.5rem 0.6rem 1.2rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            font-family: "Rubik", sans-serif;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        select:focus {
+            border-color: var(--accent-pink);
+            box-shadow: 0 0 15px rgba(255, 43, 180, 0.3);
+        }
+
+        .select-wrapper::after {
+            content: "?";
+            position: absolute;
+            right: 1.1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--accent-pink);
+            font-size: 0.75rem;
+            pointer-events: none;
+        }
+
+        /* Main Container & Multi-column Grid */
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #empty-state {
+            margin: auto;
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-sub);
+        }
+
+        #empty-state svg {
+            width: 60px;
+            height: 60px;
+            stroke: var(--accent-pink);
+            margin-bottom: 1rem;
+            opacity: 0.7;
+        }
+
+        #empty-state h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin-bottom: 0.5rem;
+        }
+
+        #empty-state p {
+            font-size: 0.95rem;
+            max-width: 420px;
+            margin: 0 auto;
+        }
+
+        /* Multi-column grid that fills horizontally across the screen */
+        #gsl-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 0.75rem 1rem;
+            width: 100%;
+            align-content: start;
+        }
+
+        .speaker-card {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            background: var(--card-bg);
+            border: 1.5px solid var(--card-border);
+            border-radius: 12px;
+            padding: 0.6rem 0.85rem;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+            transition: transform 0.15s ease, border-color 0.15s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .speaker-card:hover {
+            transform: translateY(-2px);
+            border-color: #3a3a3c;
+        }
+
+        /* Top speaker highlight */
+        .speaker-card.current-speaker {
+            border: 1.5px solid var(--accent-green);
+            background: linear-gradient(135deg, rgba(255, 43, 180, 0.15) 0%, rgba(182, 255, 26, 0.12) 100%);
+            box-shadow: 0 0 16px rgba(182, 255, 26, 0.35);
+        }
+
+        .speaker-card.current-speaker::before {
+            content: "CURRENT";
+            position: absolute;
+            top: 3px;
+            right: 8px;
+            font-size: 0.6rem;
+            font-weight: 800;
+            color: var(--accent-green);
+            letter-spacing: 1px;
+        }
+
+        .speaker-index {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: #2c2c2e;
+            color: #FFFFFF;
+            font-weight: 800;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .speaker-card.current-speaker .speaker-index {
+            background: linear-gradient(135deg, #B6FF1A 0%, #00E5FF 100%);
+            color: #121212;
+            box-shadow: 0 2px 6px rgba(182, 255, 26, 0.45);
+        }
+
+        .speaker-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            letter-spacing: 0.3px;
+        }
+
+        .speaker-card.current-speaker .speaker-name {
+            color: #FFFFFF;
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+
+        /* Footer */
+        footer {
+            margin-top: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: var(--text-sub);
+            border-top: 1px solid var(--card-border);
+            padding-top: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand-section">
+            <img src="/static/logo_2026.webp" alt="Mumbai MUN" class="brand-logo" onerror="this.src='/static/logo.png'; this.onerror=null;">
+            <div class="brand-title">
+                <h1>Mumbai MUN</h1>
+                <span>SPEAKER'S LIST</span>
+            </div>
+        </div>
+
+        <div class="header-controls">
+            <div class="select-wrapper">
+                <select id="committee-select">
+                    <option value="">Select Committee</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div id="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <h2>No Speakers Added</h2>
+            <p>Select a committee from the dropdown or add speakers on the EB Tools app to begin.</p>
+        </div>
+
+        <div id="gsl-grid" style="display: none;"></div>
+    </main>
+
+    <footer>
+        <span>MUMBAI MUN 2026</span>
+        <span id="speaker-count">0 Speakers Listed</span>
+    </footer>
+
+    <script>
+        let ws = null;
+        const select = document.getElementById("committee-select");
+        const grid = document.getElementById("gsl-grid");
+        const emptyState = document.getElementById("empty-state");
+        const speakerCount = document.getElementById("speaker-count");
+
+        fetch("/public/committees")
+            .then(res => res.json())
+            .then(committees => {
+                committees.forEach(c => {
+                    const option = document.createElement("option");
+                    option.value = c.id;
+                    option.textContent = c.name;
+                    select.appendChild(option);
+                });
+
+                if (committees.length > 0) {
+                    select.value = committees[0].id;
+                    connectCommittee(committees[0].id);
+                }
+            })
+            .catch(err => {
+                console.error("Failed to load committees:", err);
+            });
+
+        select.addEventListener("change", (e) => {
+            const committeeId = e.target.value;
+            connectCommittee(committeeId);
+        });
+
+        function connectCommittee(committeeId) {
+            if (ws) ws.close();
+            renderList([]);
+            if (!committeeId) return;
+
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/committees/${committeeId}/gsl`);
+
+            ws.onmessage = (event) => {
+                try {
+                    const gslList = JSON.parse(event.data);
+                    renderList(gslList);
+                } catch (e) {
+                    console.error("Error parsing GSL list:", e);
+                }
+            };
+        }
+
+        function renderList(list) {
+            grid.innerHTML = "";
+            speakerCount.textContent = `${list.length} Speaker${list.length === 1 ? "" : "s"} Listed`;
+
+            if (!list || list.length === 0) {
+                emptyState.style.display = "block";
+                grid.style.display = "none";
+                return;
+            }
+
+            emptyState.style.display = "none";
+            grid.style.display = "grid";
+
+            list.forEach((country, index) => {
+                const card = document.createElement("div");
+                card.className = "speaker-card" + (index === 0 ? " current-speaker" : "");
+
+                const idx = document.createElement("div");
+                idx.className = "speaker-index";
+                idx.textContent = index + 1;
+
+                const name = document.createElement("div");
+                name.className = "speaker-name";
+                name.textContent = country;
+
+                card.appendChild(idx);
+                card.appendChild(name);
+                grid.appendChild(card);
+            });
+        }
+    </script>
+</body>
+</html>
