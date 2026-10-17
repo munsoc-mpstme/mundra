@@ -69,6 +69,9 @@ class Membership(BaseModel):
     permissions: list[str] = []
 
 
+FoodPreference = Literal["veg", "non_veg", "jain"]
+
+
 class Me(AuthUser):
     """The /delegates/me response: the caller's profile and role, plus their OC access.
     A superset of AuthUser, so the extra fields are additive for older app installs."""
@@ -76,6 +79,7 @@ class Me(AuthUser):
     is_head: bool = False
     permissions: list[str] = []
     teams: list[Membership] = []
+    food_preference: FoodPreference | None = None
 
 
 class Event(BaseModel):
@@ -192,7 +196,23 @@ class User(BaseModel):
     lastname: str
     email: EmailStr
     backup_email: str = ""
+    contact: str = ""
+    dateofbirth: str = ""
+    food_preference: FoodPreference | None = None
     password: str
+
+    @field_validator("food_preference", mode="before")
+    def normalize_food_preference(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            cleaned = v.strip().lower().replace("-", "_").replace(" ", "_")
+            if not cleaned:
+                return None
+            if cleaned == "nonveg":
+                return "non_veg"
+            return cleaned
+        return v
 
     @field_validator("password")
     def validate_password(cls, v):
@@ -215,7 +235,6 @@ class ResetPassword(BaseModel):
 
 
 Meal = Literal["breakfast", "lunch", "hitea"]
-FoodPreference = Literal["veg", "non_veg", "jain"]
 
 
 class MMDelegate(Delegate):

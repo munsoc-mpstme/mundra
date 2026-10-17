@@ -152,6 +152,8 @@ async def register(request: Request, user: models.User):
                     lastname=user.lastname,
                     email=user.email,
                     backup_email=user.backup_email,
+                    contact=user.contact,
+                    dateofbirth=user.dateofbirth,
                 )
             )
         await database.add_user(user)
@@ -483,6 +485,7 @@ async def get_current_delegate(user: models.AuthUser = Depends(get_current_user)
     # is_head, permissions and teams are additive over the old Delegate response, so an
     # app install that does not read them keeps working (ADR 0003).
     is_head, perms, memberships = await database.get_effective_access(user.email)
+    mm = await database.get_mm_delegate_by_id(user.id)
     return models.Me(
         **user.model_dump(),
         is_head=is_head,
@@ -493,6 +496,7 @@ async def get_current_delegate(user: models.AuthUser = Depends(get_current_user)
             | permissions.app_permissions(user.role, is_head, perms, memberships)
         ),
         teams=memberships,
+        food_preference=mm.food_preference if mm else None,
     )
 
 
@@ -633,6 +637,13 @@ async def mm_register(request: Request, user: models.User):
                     detail=f"Mumbai MUN Delegate already registered! ID: {mm_delegate.id}",
                 )
 
+            if user.contact or user.dateofbirth:
+                if user.contact:
+                    delegate.contact = user.contact
+                if user.dateofbirth:
+                    delegate.dateofbirth = user.dateofbirth
+                delegate = await database.update_delegate_by_id(delegate.id, delegate)
+
             mm_delegate = await database.add_mm_delegate(
                 models.MMDelegate(
                     id=delegate.id,
@@ -644,6 +655,7 @@ async def mm_register(request: Request, user: models.User):
                     gender=delegate.gender,
                     pastmuns=delegate.pastmuns,
                     verified=delegate.verified,
+                    food_preference=user.food_preference,
                 )
             )
 
@@ -669,9 +681,17 @@ async def mm_register(request: Request, user: models.User):
                         lastname=user.lastname,
                         email=user.email,
                         backup_email=user.backup_email,
+                        contact=user.contact,
+                        dateofbirth=user.dateofbirth,
                         verified=False,  # becomes True only when they enter the emailed code
                     )
                 )
+            elif user.contact or user.dateofbirth:
+                if user.contact:
+                    delegate.contact = user.contact
+                if user.dateofbirth:
+                    delegate.dateofbirth = user.dateofbirth
+                delegate = await database.update_delegate_by_id(delegate.id, delegate)
 
             await database.add_user(user)
 
@@ -686,6 +706,7 @@ async def mm_register(request: Request, user: models.User):
                     gender=delegate.gender,
                     pastmuns=delegate.pastmuns,
                     verified=delegate.verified,
+                    food_preference=user.food_preference,
                 )
             )
 
