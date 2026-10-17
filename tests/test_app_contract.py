@@ -6,6 +6,7 @@ so the backend and the app stay compatible.
 """
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
@@ -67,14 +68,14 @@ def test_a_team_member_also_gets_the_matching_app_permissions(client):
 
 
 def scan(client, who, delegate_id, meal="breakfast", diet="veg"):
-    # Form-encoded, with the extra scanned_at field the app always sends.
+    # Form-encoded, with the scanned_at field the app always sends (the phone's UTC time).
     return client.post(
         "/food/scans",
         data={
             "delegate_id": delegate_id,
             "meal": meal,
             "diet": diet,
-            "scanned_at": "2026-10-03T08:00:00.000Z",
+            "scanned_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
         headers=auth_header(who),
     )
@@ -114,6 +115,18 @@ def test_scan_rejects_bad_input_and_the_wrong_people(client):
     assert scan(client, delegate_role, delegate_id).status_code == 403
     assert scan(client, eb, delegate_id).status_code == 403
     assert client.post("/food/scans", data={"delegate_id": "x", "meal": "lunch"}).status_code == 401
+
+
+def test_the_flagged_list_works_before_the_event_dates_are_set(client):
+    oc, admin = make(role="oc"), make(role="admin")
+    _, delegate_id = make_mm()
+    scan(client, oc, delegate_id, "lunch")
+    scan(client, oc, delegate_id, "lunch")  # the second one is flagged
+
+    res = client.get("/food/flags", headers=auth_header(admin))
+
+    assert res.status_code == 200
+    assert any(f["delegate_id"] == delegate_id and f["meal"] == "lunch" for f in res.json())
 
 
 def test_plate_count_follows_the_diet_the_operator_picked(client):

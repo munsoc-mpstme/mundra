@@ -1,7 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    EmailStr,
+    field_validator,
+    model_validator,
+)
 
 Role = Literal["delegate", "eb", "oc", "admin"]
 
@@ -86,8 +92,16 @@ class Event(BaseModel):
 
 
 class EventDates(BaseModel):
-    starts_at: datetime
-    ends_at: datetime
+    # An offset is required (e.g. 2026-10-30T00:00:00+05:30): the days are counted in the
+    # conference's local time, so a bare date-time would be ambiguous.
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def _ends_after_it_starts(self):
+        if self.ends_at < self.starts_at:
+            raise ValueError("ends_at must not be before starts_at")
+        return self
 
 
 class NewTeam(BaseModel):

@@ -1,12 +1,13 @@
 """OC administration: event dates, team CRUD, rosters and heads (docs/adr/0003)."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 import database
 import db
+import models
 import permissions
 from helpers import auth_header, create_user, unique_email
 from test_teams import add_head, add_membership, make, make_event, make_team
@@ -40,6 +41,84 @@ def test_a_head_sets_event_dates(client):
     )
     assert res.status_code == 200
     assert res.json()["starts_at"].startswith("2026-11-01")
+
+
+def test_event_dates_need_an_offset_and_the_right_order(client):
+    head = make()
+    event = make_event()
+    add_head(head, event)
+
+    def patch(starts_at, ends_at):
+        return client.patch(
+            f"/events/{event}",
+            json={"starts_at": starts_at, "ends_at": ends_at},
+            headers=auth_header(head),
+        )
+
+    assert patch("2098-11-01T00:00:00", "2098-11-03T00:00:00").status_code == 422
+    assert patch("2098-11-03T00:00:00+05:30", "2098-11-01T00:00:00+05:30").status_code == 422
+    assert patch("2098-11-01T00:00:00+05:30", "2098-11-03T00:00:00+05:30").status_code == 200
+
+
+def membership_ends_at(email, event_id):
+    async def fetch():
+        async with db.SessionLocal() as session:
+            return await session.scalar(
+                select(db.MembershipRow.ends_at).where(
+                    db.MembershipRow.user_email == email,
+                    db.MembershipRow.event_id == event_id,
+                )
+            )
+
+    return asyncio.run(fetch())
+
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def test_setting_event_dates_moves_team_access_to_the_end_of_the_last_day(client):
+    """A member added before the dates were set had no expiry. Setting the dates gives
+    them one: the midnight (IST) that closes the event's last day."""
+    head, member = make(), make()
+    event = make_event()
+    add_head(head, event)
+    add_membership(
+        member, event, make_team(event, "Hospitality", perms=[permissions.FOOD_MANAGE_ENTITLEMENT])
+    )
+
+    def set_dates(starts_at, ends_at):
+        res = client.patch(
+            f"/events/{event}",
+            json={"starts_at": starts_at, "ends_at": ends_at},
+            headers=auth_header(head),
+        )
+        assert res.status_code == 200
+
+    def perms():
+        return asyncio.run(database.get_effective_access(member))[1]
+
+    assert membership_ends_at(member, event) is None
+
+    # The end is given as the start of the last day; access still covers that whole day.
+    set_dates("2098-10-30T00:00:00+05:30", "2098-11-01T00:00:00+05:30")
+    assert membership_ends_at(member, event) == datetime(2098, 11, 2, tzinfo=IST)
+    assert perms() == {permissions.FOOD_MANAGE_ENTITLEMENT}
+
+    # Dates in the past lapse the access; correcting them brings it back.
+    set_dates("2025-12-30T00:00:00+05:30", "2026-01-01T23:59:59+05:30")
+    assert perms() == set()
+    set_dates("2098-10-30T00:00:00+05:30", "2098-11-01T23:59:59+05:30")
+    assert perms() == {permissions.FOOD_MANAGE_ENTITLEMENT}
+
+
+def test_a_new_member_keeps_access_through_the_events_last_day():
+    lead, member = make(), make()
+    event = make_event(ends_at=datetime(2098, 11, 1, 9, 0, tzinfo=IST))
+    team = make_team(event, "Hospitality", perms=[permissions.FOOD_MANAGE_ENTITLEMENT])
+
+    asyncio.run(database.add_to_roster(lead, team, models.RosterAdd(email=member)))
+
+    assert membership_ends_at(member, event) == datetime(2098, 11, 2, tzinfo=IST)
 
 
 def test_a_plain_member_cannot_set_event_dates(client):

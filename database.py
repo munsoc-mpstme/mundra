@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -468,6 +468,30 @@ async def delete_mm_delegate(id: str) -> None:
 
 
 ####################
+# EVENT-LOCAL TIME
+####################
+
+
+def _event_tz() -> timezone:
+    """The conference's timezone (EVENT_UTC_OFFSET_MINUTES, IST by default)."""
+    return timezone(timedelta(minutes=config.get_settings().event_utc_offset_minutes))
+
+
+def _local_date(moment: datetime) -> date:
+    """The calendar date of a moment where the conference is held. Days are counted here,
+    not in UTC: midnight IST is 18:30 UTC of the day before."""
+    return moment.astimezone(_event_tz()).date()
+
+
+def _end_of_local_day(moment: datetime | None) -> datetime | None:
+    """The midnight that closes the local day containing this moment. Team access ends
+    here, so it lasts through the event's last day whatever time the end was given as."""
+    if moment is None:
+        return None
+    return datetime.combine(_local_date(moment) + timedelta(days=1), time.min, _event_tz())
+
+
+####################
 # ORGANIZING COMMITTEE ACCESS (docs/adr/0003)
 ####################
 
@@ -555,7 +579,8 @@ async def apply_pending_invites(email: str) -> int:
                 )
             ).all()
         )
-        # ends_at follows each invite's event end, so applied access still lapses on its own.
+        # ends_at follows each invite's event end (the close of its last local day), so
+        # applied access still lapses on its own.
         event_ends = dict(
             (
                 await session.execute(
@@ -576,7 +601,7 @@ async def apply_pending_invites(email: str) -> int:
                         team_id=invite.team_id,
                         committee=invite.committee,
                         level=invite.level,
-                        ends_at=event_ends.get(invite.event_id),
+                        ends_at=_end_of_local_day(event_ends.get(invite.event_id)),
                     )
                 )
                 existing.add(invite.team_id)
@@ -622,12 +647,19 @@ async def list_events() -> list[models.Event]:
 
 
 async def set_event_dates(event_id: int, dates: models.EventDates) -> models.Event | None:
+    """Set an event's dates. Its memberships follow the new end, so members added before
+    the dates were known (or before they were corrected) lapse with the event too."""
     async with db.SessionLocal() as session, session.begin():
         row = await session.get(db.EventRow, event_id)
         if row is None:
             return None
         row.starts_at = dates.starts_at
         row.ends_at = dates.ends_at
+        await session.execute(
+            update(db.MembershipRow)
+            .where(db.MembershipRow.event_id == event_id)
+            .values(ends_at=_end_of_local_day(dates.ends_at))
+        )
     return await get_event(event_id)
 
 
@@ -756,7 +788,7 @@ async def add_to_roster(
                         team_id=team_id,
                         committee=add.committee,
                         level=add.level,
-                        ends_at=event.ends_at if event else None,
+                        ends_at=_end_of_local_day(event.ends_at) if event else None,
                     )
                 )
                 action = "grant"
@@ -963,21 +995,23 @@ async def resolve_current_event_day(
     now: datetime | None = None,
 ) -> tuple[int, int]:
     """The (event_id, 1-based day) whose date range contains today, so the scanner never
-    has to be told which day it is. Raises LookupError if no event's dates cover today
-    (dates unset, or scanning outside the conference), for a clear message to the operator.
+    has to be told which day it is. Days are the conference's local days (see _local_date).
+    Raises LookupError if no event's dates cover today (dates unset, or scanning outside
+    the conference), for a clear message to the operator.
     """
-    today = (now or datetime.now(timezone.utc)).date()
+    today = _local_date(now or datetime.now(timezone.utc))
     async with db.SessionLocal() as session:
         rows = (
             await session.execute(
-                select(db.EventRow.id, db.EventRow.starts_at, db.EventRow.ends_at).where(
-                    db.EventRow.starts_at.is_not(None), db.EventRow.ends_at.is_not(None)
-                )
+                select(db.EventRow.id, db.EventRow.starts_at, db.EventRow.ends_at)
+                .where(db.EventRow.starts_at.is_not(None), db.EventRow.ends_at.is_not(None))
+                .order_by(db.EventRow.id)
             )
         ).all()
     for event_id, starts_at, ends_at in rows:
-        if starts_at.date() <= today <= ends_at.date():
-            return event_id, (today - starts_at.date()).days + 1
+        first_day = _local_date(starts_at)
+        if first_day <= today <= _local_date(ends_at):
+            return event_id, (today - first_day).days + 1
     raise LookupError("No event is running today; set the event dates first")
 
 
@@ -995,7 +1029,7 @@ async def resolve_scan_day(now: datetime | None = None) -> tuple[int, int]:
         event_id = await session.scalar(select(db.EventRow.id).order_by(db.EventRow.id).limit(1))
     if event_id is None:
         raise LookupError("No event exists yet")
-    return event_id, (now or datetime.now(timezone.utc)).date().toordinal()
+    return event_id, _local_date(now or datetime.now(timezone.utc)).toordinal()
 
 
 async def record_meal_scan(

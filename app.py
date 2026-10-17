@@ -808,6 +808,29 @@ def _parse_diet(raw: str) -> str | None:
     return diet
 
 
+# How far back a phone's own scan time is believed: the app keeps unsent scans for the
+# three days of the conference. A little clock drift into the future is allowed.
+_SCAN_TIME_MAX_AGE = timedelta(hours=72)
+_SCAN_TIME_MAX_AHEAD = timedelta(minutes=5)
+
+
+def _parse_scanned_at(raw: str) -> datetime | None:
+    """When the phone scanned the badge, so a scan saved offline and uploaded the next
+    morning still counts for the day it was made. None (use the server's clock) when it
+    is missing, unreadable, has no offset, or is outside the window above. Never an
+    error: a bad value must not cost a delegate their plate."""
+    try:
+        scanned = datetime.fromisoformat(raw.strip())
+    except ValueError:
+        return None
+    if scanned.tzinfo is None:
+        return None
+    now = datetime.now(timezone.utc)
+    if not now - _SCAN_TIME_MAX_AGE <= scanned <= now + _SCAN_TIME_MAX_AHEAD:
+        return None
+    return scanned
+
+
 @app.get(
     "/mumbaimun/delegates/me",
     tags=["Food"],
@@ -862,17 +885,17 @@ async def scan_meal(
     delegate_id: Annotated[str, Form()],
     meal: Annotated[str, Form()],
     diet: Annotated[str, Form()] = "",
-    scanned_at: Annotated[str, Form()] = "",  # sent by the app; the server uses its own clock
+    scanned_at: Annotated[str, Form()] = "",  # when the phone scanned it (see _parse_scanned_at)
     user: models.AuthUser = Depends(require_food_scan),
 ):
-    """Record a delegate collecting a meal. The day is derived from today's date against
-    the event, so the operator only picks the meal (breakfast, lunch or high_tea) and,
-    optionally, the diet served. Returns `served`, or `duplicate` (with a 200) when they
-    already collected this meal, which is logged to the flagged list."""
+    """Record a delegate collecting a meal. The day is derived from the date of the scan
+    against the event, so the operator only picks the meal (breakfast, lunch or high_tea)
+    and, optionally, the diet served. Returns `served`, or `duplicate` (with a 200) when
+    they already collected this meal, which is logged to the flagged list."""
     meal = _parse_meal(meal)
     diet = _parse_diet(diet)
     try:
-        event_id, day = await database.resolve_scan_day()
+        event_id, day = await database.resolve_scan_day(now=_parse_scanned_at(scanned_at))
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
@@ -911,9 +934,10 @@ async def plate_count(meal: str, user: models.AuthUser = Depends(require_food_sc
     responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
 )
 async def flagged_scans(user: models.AuthUser = Depends(require_food)):
-    """Every rejected second-scan for the running event: who tried for seconds."""
+    """Every rejected second-scan for the event scans are filed under: who tried for
+    seconds. Works outside the event's dates too, e.g. to review the list afterwards."""
     try:
-        event_id, _ = await database.resolve_current_event_day()
+        event_id, _ = await database.resolve_scan_day()
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await database.get_flagged_scans(event_id)

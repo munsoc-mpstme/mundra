@@ -219,13 +219,18 @@ This backend is built with FastAPI to handle authentication, delegate management
 ### Food Routes (docs/adr/0003)
 
  1. `POST /food/scans`: Record a delegate collecting a meal (form fields `delegate_id`,
-    `meal`, optional `diet`; `scanned_at` is accepted and ignored). The day is derived from
-    the date; a second scan of the same meal returns `duplicate` and is flagged.
+    `meal`, optional `diet`, optional `scanned_at`). The day is derived from the date in
+    the conference's timezone; a second scan of the same meal returns `duplicate` and is
+    flagged. `scanned_at` is the phone's scan time (ISO 8601 with an offset): it decides
+    the day when it is at most 72 hours old and not in the future, so a scan saved offline
+    and uploaded the next morning still counts for the day it was made. Otherwise the
+    server's clock is used.
     Needs `food.manage_entitlement` (or the `oc` role, see "Delego app contract").
     `meal` is `breakfast`, `lunch` or `hitea`; `high_tea` is accepted as an alias.
  2. `GET /food/plate_count`: Live plate count for a meal today, by diet (the diet the
     operator picked at the scanner, else the delegate's registered preference).
  3. `GET /food/flags`: Rejected second-scans (who tried for seconds). Teams/heads only.
+    Works outside the event's dates too.
 
 ### OC Admin Routes (docs/adr/0003)
 
@@ -285,6 +290,13 @@ replays its exact requests. They sit on top of the OC model above without replac
 - **Meal scanning works without event dates.** If no event's dates cover today, the scan
   is filed under the first event with the calendar date as its day key, so "once per meal
   per day" holds on any day. Set the dates with `PATCH /events/{id}` to get day 1, 2, 3.
+- **Days are the conference's local days.** Day numbers and that calendar date are worked
+  out in the event timezone (`EVENT_UTC_OFFSET_MINUTES`, default 330 = IST), not UTC.
+  `PATCH /events/{id}` needs an offset on both values and an end that is not before the
+  start, e.g. `{"starts_at": "2026-10-30T00:00:00+05:30", "ends_at":
+  "2026-11-01T23:59:59+05:30"}`. Setting the dates also moves every team membership of
+  that event to end at the midnight that closes its last local day. Set them before the
+  conference: changing them on a conference day restarts that day's duplicate check.
 - **Break requests.** `POST /committees/{id}/messages` accepts `{"type": "free" | "late" |
   "accept" | "reject"}`, stored as a `status` message with that quick action in its
   payload and a standard text if no body is sent. The committee side asks (`free`, `late`:
