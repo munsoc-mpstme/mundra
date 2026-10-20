@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     verification_code_max_attempts: int = 5
     access_token_expire_minutes: int = 720  # 12h: one event day (docs/adr/0003)
     password_reset_expire_minutes: int = 30
+    # The conference's offset from UTC, in minutes (330 = IST). Meal-scan days and the end
+    # of team access are worked out in this local time, not in UTC. A fixed offset is
+    # enough because India has no daylight saving.
+    event_utc_offset_minutes: int = 330
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
     # Public base URL of this API. Used for password-reset links and the logo in emails,
@@ -75,12 +79,16 @@ class Settings(BaseSettings):
 
     @property
     def db_connect_args(self) -> dict:
-        """Extra asyncpg connect args. A managed host (DATABASE_URL set) needs SSL;
+        """Extra asyncpg connect args: connect and query time limits for every host. A
+        managed host (DATABASE_URL set) also needs SSL;
         statement_cache_size=0 keeps it working behind a transaction pooler (pgbouncer),
         which cannot reuse prepared statements. Local docker Postgres needs neither."""
+        # Time limits, so a stalled database link fails a request within seconds instead of
+        # holding it (and a pool connection) for minutes.
+        limits = {"timeout": 10, "command_timeout": 15}
         if self.database_url_raw:
-            return {"ssl": "require", "statement_cache_size": 0}
-        return {}
+            return {"ssl": "require", "statement_cache_size": 0, **limits}
+        return limits
 
 @lru_cache
 def get_settings() -> Settings:

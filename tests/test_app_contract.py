@@ -1,11 +1,13 @@
 """The Delego app's contract: exactly the requests and responses the shipped app uses.
 
 These replay what lib/auth/capabilities.dart, lib/api/scan_queue.dart,
-lib/Pages/Qr_Page/Qr_scanner.dart and lib/Pages/Chat_Page/committee_chat_page.dart send,
+lib/Pages/Qr_Page/Qr_scanner.dart, lib/Pages/Chat_Page/committee_chat_page.dart and
+lib/api/floor_client.dart (EB Tools) send,
 so the backend and the app stay compatible.
 """
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
@@ -67,14 +69,14 @@ def test_a_team_member_also_gets_the_matching_app_permissions(client):
 
 
 def scan(client, who, delegate_id, meal="breakfast", diet="veg"):
-    # Form-encoded, with the extra scanned_at field the app always sends.
+    # Form-encoded, with the scanned_at field the app always sends (the phone's UTC time).
     return client.post(
         "/food/scans",
         data={
             "delegate_id": delegate_id,
             "meal": meal,
             "diet": diet,
-            "scanned_at": "2026-10-03T08:00:00.000Z",
+            "scanned_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
         headers=auth_header(who),
     )
@@ -114,6 +116,18 @@ def test_scan_rejects_bad_input_and_the_wrong_people(client):
     assert scan(client, delegate_role, delegate_id).status_code == 403
     assert scan(client, eb, delegate_id).status_code == 403
     assert client.post("/food/scans", data={"delegate_id": "x", "meal": "lunch"}).status_code == 401
+
+
+def test_the_flagged_list_works_before_the_event_dates_are_set(client):
+    oc, admin = make(role="oc"), make(role="admin")
+    _, delegate_id = make_mm()
+    scan(client, oc, delegate_id, "lunch")
+    scan(client, oc, delegate_id, "lunch")  # the second one is flagged
+
+    res = client.get("/food/flags", headers=auth_header(admin))
+
+    assert res.status_code == 200
+    assert any(f["delegate_id"] == delegate_id and f["meal"] == "lunch" for f in res.json())
 
 
 def test_plate_count_follows_the_diet_the_operator_picked(client):
@@ -388,3 +402,48 @@ def test_admin_builds_a_hospitality_team_and_its_member_can_scan(client):
     removed = client.delete(f"/teams/{team_id}/members/{member}", headers=h)
     assert removed.status_code == 200
     assert scan(client, member, delegate_id, "lunch").status_code == 403
+
+
+# ---- EB Tools: the committee floor (lib/api/floor_client.dart) -------------------------
+
+
+def test_a_plain_eb_runs_the_floor_the_way_the_app_does(client):
+    """An `eb`-role user has eb.tools, picks a committee from /public/committees (no
+    /committees, which needs chat access) and drives the floor with ops."""
+    headers = auth_header(make(role="eb"))
+    me = client.get("/delegates/me", headers=headers).json()
+    assert "eb.tools" in me["permissions"]
+
+    committees = client.get("/public/committees").json()
+    cid = next(c["id"] for c in committees if c["name"] == "IPC")
+
+    # The app loads the committee's matrix for its dropdown ([] for IPC: free entry).
+    unsc = next(c["id"] for c in committees if c["name"] == "UNSC")
+    matrix = client.get(f"/public/committees/{unsc}/portfolios").json()
+    assert set(matrix[0]) == {"name", "code", "tag", "detail"}
+    assert client.get(f"/public/committees/{cid}/portfolios").json() == []
+
+    def send(body):
+        res = client.post(f"/committees/{cid}/floor/ops", json=body, headers=headers)
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    send({"op": "clear", "list": "gsl"})
+    send({"op": "reset"})
+    send({"op": "add", "list": "gsl", "name": "India", "code": "in"})
+    frame = send({"op": "add", "list": "gsl", "name": "Ms Rao", "code": None})
+    assert frame["type"] == "state" and isinstance(frame["server_now"], int)
+    entry = frame["state"]["lists"]["gsl"]["entries"][-1]
+    assert set(entry) == {"id", "name", "code", "tag"}
+
+    frame = send({"op": "start_speaker", "list": "gsl", "replace": False})
+    timer = frame["state"]["timer"]
+    assert set(timer) == {
+        "kind", "list", "speaker_id", "duration", "running", "ends_at", "remaining_ms"
+    }
+    send({"op": "pause"})
+    send({"op": "reset"})
+    send({"op": "clear", "list": "gsl"})
+
+    with client.websocket_connect(f"/ws/committees/{cid}/floor") as ws:
+        assert ws.receive_json()["state"]["lists"]["gsl"]["entries"] == []

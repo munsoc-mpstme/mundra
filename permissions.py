@@ -103,6 +103,15 @@ APP_ROLE_PERMISSIONS = {
     ),
 }
 
+# Who may change a committee's floor (EB Tools: speakers' lists and timer): the roles that
+# see EB Tools, plus heads. Any committee: each EB picks their own in the app.
+FLOOR_ROLES = ("eb", "oc", "admin")
+
+
+def can_run_floor(role: str, is_head: bool) -> bool:
+    return role in FLOOR_ROLES or is_head
+
+
 # Roles that hold the OC baseline on the server too: they may scan meals and use break
 # coordination without being on a team. (Teams and heads still work as before.)
 OC_BASELINE_ROLES = ("oc",)

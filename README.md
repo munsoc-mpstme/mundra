@@ -170,6 +170,8 @@ This backend is built with FastAPI to handle authentication, delegate management
  - **data/**: JSON content served by the app (`rooms.json`, `schedule.json`).
  - **tests/**: Smoke, database and role tests, run against a real Postgres.
  - **utils.py**: Contains helper functions, such as QR code generation.
+ - **floor.py**: The live committee floor for EB Tools (speakers' lists and the synced timer).
+ - **static/live_gsl.html**: The committee smartboard page that shows the floor.
 
 ## Key Endpoints
 ### Below is a concise list. See the code for exact response and request models.
@@ -219,13 +221,18 @@ This backend is built with FastAPI to handle authentication, delegate management
 ### Food Routes (docs/adr/0003)
 
  1. `POST /food/scans`: Record a delegate collecting a meal (form fields `delegate_id`,
-    `meal`, optional `diet`; `scanned_at` is accepted and ignored). The day is derived from
-    the date; a second scan of the same meal returns `duplicate` and is flagged.
+    `meal`, optional `diet`, optional `scanned_at`). The day is derived from the date in
+    the conference's timezone; a second scan of the same meal returns `duplicate` and is
+    flagged. `scanned_at` is the phone's scan time (ISO 8601 with an offset): it decides
+    the day when it is at most 72 hours old and not in the future, so a scan saved offline
+    and uploaded the next morning still counts for the day it was made. Otherwise the
+    server's clock is used.
     Needs `food.manage_entitlement` (or the `oc` role, see "Delego app contract").
     `meal` is `breakfast`, `lunch` or `hitea`; `high_tea` is accepted as an alias.
  2. `GET /food/plate_count`: Live plate count for a meal today, by diet (the diet the
     operator picked at the scanner, else the delegate's registered preference).
  3. `GET /food/flags`: Rejected second-scans (who tried for seconds). Teams/heads only.
+    Works outside the event's dates too.
 
 ### OC Admin Routes (docs/adr/0003)
 
@@ -258,6 +265,42 @@ This backend is built with FastAPI to handle authentication, delegate management
     worker); Postgres holds the durable history. See `chat.py` for the swap-in point if the
     app is ever scaled to multiple processes.
 
+### Committee floor: EB Tools and the smartboard (`floor.py`)
+
+Each committee has one floor: the GSL, the moderated caucus list and one timer (a
+speaker's or an unmoderated caucus). Both EB members change it from the app; the room's
+smartboard follows it live.
+
+ 1. `GET /public/committees`: event 1's committees by name (public; the board's and the
+    app's committee picker).
+ 2. `GET /committees/{id}/floor`: the floor as `{type: "state", state, server_now}`
+    (public, read-only).
+ 3. `POST /committees/{id}/floor/ops`: one op (`add`, `remove`, `move`, `clear`,
+    `set_speaker_time`, `start_speaker`, `start_unmod`, `pause`, `resume`, `reset`, `next`,
+    `set_display`; see `models.FloorOp`). `next` names the speaker (`entry_id`) and is a 409
+    if they are already gone, so a late or doubled Next never removes the next delegate. For the `eb`, `oc` and `admin` roles and heads, on
+    any committee; every change records who made it. 409 for a duplicate name, an empty
+    list, or starting a timer while another runs (unless `replace: true`).
+ 4. `WS /ws/committees/{id}/floor`: the same frame on connect, after every change, and
+    at least every 20 s (a heartbeat, so clients can tell a dead link from a quiet floor;
+    the board and the app reconnect after 45 s without a frame). Public and read-only (a
+    client that sends anything is closed with 1008; 4404 unknown committee; at most 30
+    viewers per committee, then 1013; a client that stops taking frames is closed, 1011).
+ 5. `GET /public/committees/{id}/portfolios`: the committee's official portfolio matrix in
+    sheet order (`[]` for CCC and IPC). For a committee with a matrix, `add` takes the
+    matrix's own name and flag (or party tag, PSC); anything else is added as a person.
+ 6. Smartboard: `/static/live_gsl.html?committee=<id>` (the choice is also remembered;
+    press C to switch). Flags come from the flag-icons CDN.
+
+The timer is stored as an absolute end time on the server clock, so phones and the board
+draw the same countdown. When a speaker's time runs out the server removes that speaker
+(by id) and leaves the timer idle for the EB to start the next one. The floor is saved in
+`committee_floors` (one JSON row per committee), so a restart or redeploy keeps the lists
+and resumes a running timer. Fan-out is in-process, so it needs a single worker. Each
+socket has its own writer that sends only the newest state, so an EB's tap never waits for
+a slow board; an op that can't get the committee's lock within 10 s (a stalled database)
+gets 503 instead of landing much later.
+
 ## Delego app contract
 
 The Delego mobile app was built against these behaviours, and `tests/test_app_contract.py`
@@ -285,6 +328,13 @@ replays its exact requests. They sit on top of the OC model above without replac
 - **Meal scanning works without event dates.** If no event's dates cover today, the scan
   is filed under the first event with the calendar date as its day key, so "once per meal
   per day" holds on any day. Set the dates with `PATCH /events/{id}` to get day 1, 2, 3.
+- **Days are the conference's local days.** Day numbers and that calendar date are worked
+  out in the event timezone (`EVENT_UTC_OFFSET_MINUTES`, default 330 = IST), not UTC.
+  `PATCH /events/{id}` needs an offset on both values and an end that is not before the
+  start, e.g. `{"starts_at": "2026-10-30T00:00:00+05:30", "ends_at":
+  "2026-11-01T23:59:59+05:30"}`. Setting the dates also moves every team membership of
+  that event to end at the midnight that closes its last local day. Set them before the
+  conference: changing them on a conference day restarts that day's duplicate check.
 - **Break requests.** `POST /committees/{id}/messages` accepts `{"type": "free" | "late" |
   "accept" | "reject"}`, stored as a `status` message with that quick action in its
   payload and a standard text if no body is sent. The committee side asks (`free`, `late`:

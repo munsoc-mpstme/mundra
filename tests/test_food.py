@@ -1,10 +1,11 @@
 """Food: preference, meal scanning, plate count and the flagged list (docs/adr/0003)."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+import app as app_module
 import database
 import db
 import models
@@ -13,16 +14,20 @@ from helpers import auth_header
 from test_teams import add_membership, make, make_event, make_team
 
 
-def make_dated_event(name="Food Event"):
-    """An event whose date range covers today, so resolve_current_event_day finds it.
-    Module-scoped in tests via the food_event fixture: it must be the only dated event so
-    the resolution is unambiguous (the other tests' events are left date-less)."""
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def make_dated_event(name="Food Event", starts_at=None, ends_at=None):
+    """An event whose date range covers today (unless dates are given), so
+    resolve_current_event_day finds it. Module-scoped in tests via the food_event fixture:
+    it must be the first event covering today so the resolution is unambiguous (the other
+    tests' events are left date-less or dated far from today)."""
     async def go():
         async with db.SessionLocal() as session, session.begin():
             event = db.EventRow(
                 name=name,
-                starts_at=datetime.now(timezone.utc) - timedelta(days=1),
-                ends_at=datetime.now(timezone.utc) + timedelta(days=1),
+                starts_at=starts_at or datetime.now(timezone.utc) - timedelta(days=1),
+                ends_at=ends_at or datetime.now(timezone.utc) + timedelta(days=1),
             )
             session.add(event)
             await session.flush()
@@ -171,6 +176,74 @@ def test_resolve_raises_when_no_event_runs_today():
     far_future = datetime(2099, 1, 1, tzinfo=timezone.utc)
     with pytest.raises(LookupError):
         asyncio.run(database.resolve_current_event_day(now=far_future))
+
+
+def test_days_are_counted_in_the_conference_timezone():
+    """Dates given in IST: the first IST day is day 1, although it starts on the UTC day
+    before. The year is far off so no other test's event covers these dates."""
+    event = make_dated_event(
+        "IST Event",
+        starts_at=datetime(2098, 10, 30, 0, 0, tzinfo=IST),
+        ends_at=datetime(2098, 11, 1, 23, 59, 59, tzinfo=IST),
+    )
+
+    def resolve(*when):
+        return asyncio.run(database.resolve_current_event_day(now=datetime(*when, tzinfo=IST)))
+
+    assert resolve(2098, 10, 30, 0, 5) == (event, 1)  # 18:35 UTC on the 29th
+    assert resolve(2098, 10, 30, 8, 0) == (event, 1)
+    assert resolve(2098, 11, 1, 0, 30) == (event, 3)  # still 31 Oct in UTC
+    assert resolve(2098, 11, 1, 23, 30) == (event, 3)
+    for outside in ((2098, 10, 29, 23, 30), (2098, 11, 2, 0, 30)):
+        with pytest.raises(LookupError):
+            resolve(*outside)
+
+
+def test_the_fallback_day_key_is_the_local_calendar_date():
+    """With no event running, 00:30 IST files under that IST date, not the UTC one."""
+    _, day = asyncio.run(database.resolve_scan_day(now=datetime(2097, 5, 2, 0, 30, tzinfo=IST)))
+    assert day == date(2097, 5, 2).toordinal()
+
+
+# --- the phone's scan time (offline scans uploaded later) --------------------------
+
+
+def test_a_scan_saved_yesterday_counts_for_yesterday(client, food_event):
+    """An offline scan uploaded the next day is filed under the day it was made, so it
+    does not use up today's meal."""
+    hospi = hospitality_member()
+    _, delegate_id = make_mm()
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+
+    late = client.post(
+        "/food/scans",
+        data={"delegate_id": delegate_id, "meal": "lunch", "scanned_at": yesterday.isoformat()},
+        headers=auth_header(hospi),
+    )
+    today = client.post(
+        "/food/scans",
+        data={"delegate_id": delegate_id, "meal": "lunch"},
+        headers=auth_header(hospi),
+    )
+
+    assert (late.json()["result"], late.json()["day"]) == ("served", 1)
+    assert (today.json()["result"], today.json()["day"]) == ("served", 2)
+
+
+def test_an_unusable_scan_time_falls_back_to_the_server_clock():
+    now = datetime.now(timezone.utc)
+    parse = app_module._parse_scanned_at
+
+    assert parse(now.isoformat().replace("+00:00", "Z")) is not None  # as the app sends it
+    assert parse((now - timedelta(hours=71)).isoformat()) is not None
+    for unusable in (
+        "",
+        "not a date",
+        now.replace(tzinfo=None).isoformat(),  # no offset
+        (now + timedelta(hours=1)).isoformat(),  # phone clock ahead
+        (now - timedelta(hours=73)).isoformat(),  # older than the app keeps scans
+    ):
+        assert parse(unusable) is None
 
 
 # --- preference -------------------------------------------------------------------
