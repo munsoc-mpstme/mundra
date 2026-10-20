@@ -9,6 +9,7 @@ import secrets
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager, selectinload
 
@@ -1202,6 +1203,50 @@ async def list_committees(event_id: int) -> list[models.Committee]:
             .order_by(db.CommitteeRow.name)
         )
         return [_to_committee(row) for row in rows]
+
+
+async def get_floor_state(committee_id: int) -> dict | None:
+    """A committee's saved floor (see floor.py), or None if it was never changed."""
+    async with db.SessionLocal() as session:
+        row = await session.get(db.CommitteeFloorRow, committee_id)
+        return dict(row.state) if row else None
+
+
+async def save_floor_state(committee_id: int, state: dict, email: str | None) -> None:
+    """Insert or replace a committee's floor."""
+    stmt = pg_insert(db.CommitteeFloorRow).values(
+        committee_id=committee_id, state=state, updated_by=email
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[db.CommitteeFloorRow.committee_id],
+        set_={"state": stmt.excluded.state, "updated_by": stmt.excluded.updated_by,
+              "updated_at": func.now()},
+    )
+    async with db.SessionLocal() as session, session.begin():
+        await session.execute(stmt)
+
+
+async def list_committee_portfolios(committee_id: int) -> list[dict]:
+    """A committee's portfolio matrix in sheet order ([] when it has none):
+    [{name, code, tag, detail}]."""
+    async with db.SessionLocal() as session:
+        rows = await session.scalars(
+            select(db.CommitteePortfolioRow)
+            .where(db.CommitteePortfolioRow.committee_id == committee_id)
+            .order_by(db.CommitteePortfolioRow.position)
+        )
+        return [
+            {"name": r.name, "code": r.code, "tag": r.tag, "detail": r.detail} for r in rows
+        ]
+
+
+async def list_running_floor_ids() -> list[int]:
+    """Committees whose floor timer was running when last saved (at most a few rows)."""
+    async with db.SessionLocal() as session:
+        rows = await session.execute(
+            select(db.CommitteeFloorRow.committee_id, db.CommitteeFloorRow.state)
+        )
+        return [cid for cid, state in rows if (state.get("timer") or {}).get("running")]
 
 
 async def get_committee(committee_id: int) -> models.Committee | None:

@@ -170,6 +170,8 @@ This backend is built with FastAPI to handle authentication, delegate management
  - **data/**: JSON content served by the app (`rooms.json`, `schedule.json`).
  - **tests/**: Smoke, database and role tests, run against a real Postgres.
  - **utils.py**: Contains helper functions, such as QR code generation.
+ - **floor.py**: The live committee floor for EB Tools (speakers' lists and the synced timer).
+ - **static/live_gsl.html**: The committee smartboard page that shows the floor.
 
 ## Key Endpoints
 ### Below is a concise list. See the code for exact response and request models.
@@ -262,6 +264,42 @@ This backend is built with FastAPI to handle authentication, delegate management
     first frame, then `NewChatMessage` frames. Fan-out is in-process (single uvicorn
     worker); Postgres holds the durable history. See `chat.py` for the swap-in point if the
     app is ever scaled to multiple processes.
+
+### Committee floor: EB Tools and the smartboard (`floor.py`)
+
+Each committee has one floor: the GSL, the moderated caucus list and one timer (a
+speaker's or an unmoderated caucus). Both EB members change it from the app; the room's
+smartboard follows it live.
+
+ 1. `GET /public/committees`: event 1's committees by name (public; the board's and the
+    app's committee picker).
+ 2. `GET /committees/{id}/floor`: the floor as `{type: "state", state, server_now}`
+    (public, read-only).
+ 3. `POST /committees/{id}/floor/ops`: one op (`add`, `remove`, `move`, `clear`,
+    `set_speaker_time`, `start_speaker`, `start_unmod`, `pause`, `resume`, `reset`, `next`,
+    `set_display`; see `models.FloorOp`). `next` names the speaker (`entry_id`) and is a 409
+    if they are already gone, so a late or doubled Next never removes the next delegate. For the `eb`, `oc` and `admin` roles and heads, on
+    any committee; every change records who made it. 409 for a duplicate name, an empty
+    list, or starting a timer while another runs (unless `replace: true`).
+ 4. `WS /ws/committees/{id}/floor`: the same frame on connect, after every change, and
+    at least every 20 s (a heartbeat, so clients can tell a dead link from a quiet floor;
+    the board and the app reconnect after 45 s without a frame). Public and read-only (a
+    client that sends anything is closed with 1008; 4404 unknown committee; at most 30
+    viewers per committee, then 1013; a client that stops taking frames is closed, 1011).
+ 5. `GET /public/committees/{id}/portfolios`: the committee's official portfolio matrix in
+    sheet order (`[]` for CCC and IPC). For a committee with a matrix, `add` takes the
+    matrix's own name and flag (or party tag, PSC); anything else is added as a person.
+ 6. Smartboard: `/static/live_gsl.html?committee=<id>` (the choice is also remembered;
+    press C to switch). Flags come from the flag-icons CDN.
+
+The timer is stored as an absolute end time on the server clock, so phones and the board
+draw the same countdown. When a speaker's time runs out the server removes that speaker
+(by id) and leaves the timer idle for the EB to start the next one. The floor is saved in
+`committee_floors` (one JSON row per committee), so a restart or redeploy keeps the lists
+and resumes a running timer. Fan-out is in-process, so it needs a single worker. Each
+socket has its own writer that sends only the newest state, so an EB's tap never waits for
+a slow board; an op that can't get the committee's lock within 10 s (a stalled database)
+gets 503 instead of landing much later.
 
 ## Delego app contract
 

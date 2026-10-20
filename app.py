@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import csv
 import logging
 from contextlib import asynccontextmanager
@@ -6,11 +7,13 @@ from functools import lru_cache
 from io import StringIO
 import os
 from typing import Annotated
+import time
 import uuid
 import json
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     FastAPI,
     Form,
@@ -44,7 +47,7 @@ from auth import (
 )
 from sqlalchemy.exc import IntegrityError
 import chat
-import gsl
+import floor
 import config
 import database
 import db
@@ -93,7 +96,9 @@ async def bootstrap_admin() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await bootstrap_admin()
+    await floor.hub.restore()
     yield
+    await floor.hub.shutdown()
     await db.engine.dispose()
 
 
@@ -1584,61 +1589,174 @@ def get_schedule():
     """Returns the full event schedule data including day metadata."""
     schedule_data = read_schedule_data()
     return schedule_data
-@app.post("/committees/{committee_id}/gsl", tags=["gsl"])
-async def update_gsl(
-    committee_id: int,
-    gsl_list: list[str],
-    user: Annotated[models.AuthUser, Depends(get_current_user)],
-):
-    committee = await database.get_committee(committee_id)
-    if not committee:
-        raise HTTPException(404, "Committee not found")
-    # For now, allow anyone with EB_TOOLS or CHAT_POST or just checking if they are not delegate.
-    # Actually, lets use CHAT_POST as a placeholder.
-    if not await _committee_access(user, committee, permissions.CHAT_POST):
-        raise HTTPException(403, "Not allowed to update GSL")
-    
-    await gsl.gsl_hub.update_list(committee_id, gsl_list)
-    return {"status": "ok"}
-
-@app.websocket("/ws/committees/{committee_id}/gsl")
-async def committee_gsl_ws(websocket: WebSocket, committee_id: int):
-    await websocket.accept()
-    await gsl.gsl_hub.connect(committee_id, websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        await gsl.gsl_hub.disconnect(committee_id, websocket)
 
 
-@app.post("/committees/{committee_id}/gsl", tags=["gsl"])
-async def update_gsl(
-    committee_id: int,
-    gsl_list: list[str],
-    user: Annotated[models.AuthUser, Depends(get_current_user)],
-):
-    committee = await database.get_committee(committee_id)
-    if not committee:
-        raise HTTPException(404, "Committee not found")
-    if not await _committee_access(user, committee, permissions.CHAT_POST):
-        raise HTTPException(403, "Not allowed to update GSL")
-    
-    await gsl.gsl_hub.update_list(committee_id, gsl_list)
-    return {"status": "ok"}
+####################
 
-@app.websocket("/ws/committees/{committee_id}/gsl")
-async def committee_gsl_ws(websocket: WebSocket, committee_id: int):
-    await websocket.accept()
-    await gsl.gsl_hub.connect(committee_id, websocket)
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        await gsl.gsl_hub.disconnect(committee_id, websocket)
+# Committee floor (EB Tools): the GSL and moderated caucus speakers' lists and the timer,
+# shown live on the smartboard (static/live_gsl.html). See floor.py.
 
-@app.get("/public/committees", tags=["gsl"])
+
+@app.get(
+    "/public/committees",
+    tags=["Floor"],
+    response_model=list[models.Committee],
+)
 async def public_list_committees():
-    # Return all committees from event 1 for the smartboard
+    """The committees of the conference (event 1), by name, for the smartboard and the EB
+    Tools committee picker. Public: committee names aren't secret."""
     return await database.list_committees(1)
 
+
+# Committees that exist, remembered for a minute so the boards' polls and reconnects don't
+# each cost a query (committees are only ever added, by a head, before the conference).
+_known_committees: dict[int, float] = {}
+
+
+async def _committee_exists(committee_id: int) -> bool:
+    now = time.monotonic()
+    seen = _known_committees.get(committee_id)
+    if seen is not None and now - seen < 60:
+        return True
+    if await database.get_committee(committee_id):
+        _known_committees[committee_id] = now
+        return True
+    return False
+
+
+# Each committee's portfolio matrix, remembered for 5 minutes (the matrices don't change
+# during the conference).
+_matrices: dict[int, tuple[float, list[dict]]] = {}
+
+
+async def _committee_matrix(committee_id: int) -> list[dict]:
+    now = time.monotonic()
+    cached = _matrices.get(committee_id)
+    if cached is not None and now - cached[0] < 300:
+        return cached[1]
+    matrix = await database.list_committee_portfolios(committee_id)
+    _matrices[committee_id] = (now, matrix)
+    return matrix
+
+
+def _resolve_portfolio(op: dict, matrix: list[dict]) -> dict:
+    """For a committee with a matrix, an add takes the matrix's own name, flag and party
+    tag (whatever the client sent), so a typo or a wrong flag can't reach the board. A name
+    that isn't in the matrix ("Add other") is added as a person: no flag, no tag."""
+    if op["op"] != "add" or not matrix:
+        return op
+    wanted = op["name"].casefold()
+    for portfolio in matrix:
+        if portfolio["name"].casefold() == wanted:
+            return {**op, "name": portfolio["name"], "code": portfolio["code"], "tag": portfolio["tag"]}
+    return {**op, "code": None, "tag": None}
+
+
+async def _floor_committee(committee_id: int) -> None:
+    if not await _committee_exists(committee_id):
+        raise HTTPException(status_code=404, detail="Committee not found")
+
+
+@app.get(
+    "/public/committees/{committee_id}/portfolios",
+    tags=["Floor"],
+    response_model=list[models.CommitteePortfolio],
+    responses={404: {"model": models.ErrorResponse}},
+)
+async def public_committee_portfolios(committee_id: int):
+    """A committee's official portfolio matrix, in sheet order; [] for a committee without
+    one (CCC, IPC), whose EBs add anyone. Public, like the matrices themselves."""
+    await _floor_committee(committee_id)
+    return await _committee_matrix(committee_id)
+
+
+@app.get(
+    "/committees/{committee_id}/floor",
+    tags=["Floor"],
+    response_model=models.FloorFrame,
+    responses={404: {"model": models.ErrorResponse}},
+)
+async def get_committee_floor(committee_id: int):
+    """A committee's lists and timer. Public and read-only, like the board that shows it."""
+    await _floor_committee(committee_id)
+    try:
+        return floor.frame(await floor.hub.snapshot(committee_id))
+    except floor.FloorError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post(
+    "/committees/{committee_id}/floor/ops",
+    tags=["Floor"],
+    response_model=models.FloorFrame,
+    responses={
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+        409: {"model": models.ErrorResponse},
+        503: {"model": models.ErrorResponse},
+    },
+)
+# High: every EB in the venue can share one public IP.
+@limiter.limit("600/minute")
+async def committee_floor_op(
+    request: Request,
+    committee_id: int,
+    op: Annotated[models.FloorOp, Body()],
+    user: Annotated[models.AuthUser, Depends(get_current_user)],
+):
+    """Change a committee's floor with one op (add, remove, move, clear, set_speaker_time,
+    start_speaker, start_unmod, pause, resume, reset, next, set_display) and get the new
+    state back. Everyone watching the floor gets it too. For EBs, OC, admins and heads."""
+    is_head = False
+    if user.role not in permissions.FLOOR_ROLES:
+        is_head, _, _ = await database.get_effective_access(user.email)
+    if not permissions.can_run_floor(user.role, is_head):
+        raise HTTPException(status_code=403, detail="Only the EB can change the floor")
+    await _floor_committee(committee_id)
+    resolved = _resolve_portfolio(op.model_dump(), await _committee_matrix(committee_id))
+    try:
+        state = await floor.hub.apply(committee_id, resolved, user.email)
+    except floor.FloorError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    return floor.frame(state)
+
+
+@app.websocket("/ws/committees/{committee_id}/floor")
+async def committee_floor_ws(websocket: WebSocket, committee_id: int):
+    """Follow a committee's floor live: the state on connect, after every change, and at
+    least every floor.HEARTBEAT_SECONDS (so a client can tell a dead link from a quiet
+    floor). Public and read-only (the smartboard has no login); a client that sends
+    anything is closed (1008). 4404 unknown committee, 1013 when the committee has too many
+    viewers, 1011 when the client stops taking frames."""
+    await websocket.accept()
+    if not await _committee_exists(committee_id):
+        await websocket.close(code=4404)
+        return
+    viewer = floor.hub.connect(committee_id, websocket)
+    if viewer is None:
+        await websocket.close(code=1013)
+        return
+
+    async def push_state() -> None:
+        try:
+            viewer.push_state(await floor.hub.snapshot(committee_id))
+        except floor.FloorError:
+            pass  # the floor is busy (a slow database); the next beat retries
+
+    try:
+        await push_state()
+        while not viewer.dead:
+            try:
+                message = await asyncio.wait_for(
+                    websocket.receive(), floor.HEARTBEAT_SECONDS
+                )
+            except TimeoutError:
+                await push_state()  # the heartbeat
+                continue
+            if message["type"] != "websocket.disconnect":
+                await websocket.close(code=1008)
+            break
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        floor.hub.disconnect(committee_id, viewer)

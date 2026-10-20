@@ -1,379 +1,530 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mumbai MUN - Speaker's List</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,400;0,600;0,800;0,900;1,700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-color: #121212;
-            --card-bg: #1c1c1e;
-            --card-border: #2c2c2e;
-            --accent-pink: #FF2BB4;
-            --accent-yellow: #FFF21A;
-            --accent-cyan: #00E5FF;
-            --text-main: #FFFFFF;
-            --text-sub: #8E8E93;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speakers' List · Mumbai MUN'26</title>
+<!--
+  The committee smartboard. Follows one committee's floor live (WS /ws/committees/{id}/floor):
+  the list the EB has on screen (GSL or moderated caucus) and the timer, bottom right.
+  Open with ?committee=<id> to skip the picker; the choice is also remembered. Press C (or
+  click the committee name) to switch. Public and read-only: the EB changes it from the app.
+-->
+<style>
+  :root {
+    --bg: #000000;
+    --card: #141214;
+    --card-line: #2a2629;
+    --ink: #FFFFFF;
+    --muted: #9A8F94;
+    --danger: #FF4E27;
+    /* Brand colourways: vertical gradients ending in warm grey, each with one accent. */
+    --pink: linear-gradient(180deg, #EE1C9C 5%, #C63087 38%, #A9407C 57%, #62575D 83%);
+    --pink-accent: #FFFD2A;
+    --blue: linear-gradient(180deg, #005CFF 5%, #206AED 38%, #454DA6 57%, #62575D 83%);
+    --blue-accent: #A9FF48;
+    --green: linear-gradient(180deg, #159555 2%, #20BA6D 51%, #62575D 95%);
+    --green-accent: #27FFFF;
+    --surface: var(--pink);
+    --accent: var(--pink-accent);
+  }
+  body.view-mod { --surface: var(--blue); --accent: var(--blue-accent); }
+  body.view-unmod { --surface: var(--green); --accent: var(--green-accent); }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 28px;
+    gap: 18px;
+    overflow: hidden;
+  }
 
-        body {
-            font-family: "Rubik", sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
-            padding: 1.25rem 2rem;
-        }
+  /* --- header --- */
+  header { display: flex; align-items: center; gap: 24px; }
+  .wordmark { font-size: 22px; letter-spacing: 1px; white-space: nowrap; }
+  .wordmark b { font-weight: 700; }
+  .committee {
+    font-size: 40px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .view-label {
+    margin-left: auto; padding: 8px 18px; border-radius: 999px;
+    background: var(--surface); font-size: 20px; font-weight: 700; white-space: nowrap;
+  }
 
-        /* Header section */
-        header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.85rem 1.75rem;
-            background: #18181a;
-            border: 1px solid var(--card-border);
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
-            margin-bottom: 1.5rem;
-            gap: 1.5rem;
-        }
+  /* --- speakers --- */
+  main { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+  #grid {
+    display: grid; gap: 12px 16px; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  }
+  .speaker {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--card); border: 1px solid var(--card-line); border-radius: 16px;
+    padding: 12px 16px; min-width: 0;
+  }
+  .speaker .num {
+    flex: none; width: 40px; text-align: right;
+    font-size: 24px; font-weight: 700; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .speaker .name {
+    font-size: 26px; font-weight: 700; min-width: 0; line-height: 1.15;
+    overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+  .speaker.current { background: var(--surface); border-color: transparent; }
+  .speaker.current .num { color: var(--accent); }
+  #grid.dense { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px 12px; }
+  #grid.dense .speaker { padding: 8px 12px; border-radius: 12px; }
+  #grid.dense .name { font-size: 20px; }
+  #grid.dense .num { font-size: 18px; width: 30px; }
+  #grid.denser { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 6px 10px; }
+  #grid.denser .speaker { padding: 5px 10px; }
+  #grid.denser .name { font-size: 16px; }
+  #grid.denser .num { font-size: 14px; width: 26px; }
 
-        .brand-section {
-            display: flex;
-            align-items: center;
-            gap: 1.15rem;
-        }
+  .flag {
+    flex: none; width: 48px; height: 36px; border-radius: 4px; object-fit: cover;
+    background: #2a2629;
+  }
+  #grid.dense .flag { width: 36px; height: 27px; }
+  #grid.denser .flag { width: 28px; height: 21px; }
+  .person {
+    flex: none; width: 48px; height: 36px; display: grid; place-items: center;
+    border-radius: 4px; background: #2a2629;
+  }
+  /* A party abbreviation (PSC) in place of a flag: neutral; as tall as a flag and as wide
+     as the abbreviation needs, so "SS(UBT)" stays as legible as "BJP". */
+  .tag {
+    flex: none; min-width: 48px; height: 36px; padding: 0 6px; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; background: #FFFFFF; color: #000000;
+    font-size: 15px; font-weight: 700; white-space: nowrap;
+  }
+  #grid.dense .tag { min-width: 36px; height: 27px; padding: 0 4px; font-size: 12px; }
+  #grid.denser .tag { min-width: 28px; height: 21px; padding: 0 3px; font-size: 10px; }
+  #timer .who .tag { min-width: 40px; height: 30px; font-size: 14px; }
+  .person svg { width: 26px; height: 26px; fill: var(--ink); opacity: .85; }
+  #grid.dense .person { width: 36px; height: 27px; }
+  #grid.denser .person { width: 28px; height: 21px; }
 
-        .brand-logo {
-            width: 52px;
-            height: 52px;
-            object-fit: contain;
-            filter: drop-shadow(0 0 6px rgba(255, 43, 180, 0.4));
-            border-radius: 10px;
-        }
+  .empty { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-content: center; text-align: center; gap: 8px; }
+  .empty h2 { font-size: 36px; }
+  .empty p { color: var(--muted); font-size: 20px; }
 
-        .brand-title {
-            display: flex;
-            flex-direction: column;
-        }
+  /* --- bottom bar: status (left) and timer (right) --- */
+  footer { display: flex; align-items: flex-end; gap: 24px; }
+  #timer {
+    width: 460px; max-width: 100%; border-radius: 24px; padding: 18px 24px;
+    background: var(--surface);
+  }
+  #timer .who { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+  #timer .who .label { font-size: 14px; letter-spacing: 2px; font-weight: 700; color: var(--accent); }
+  #timer .who .name { font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #timer .who .flag, #timer .who .person { width: 40px; height: 30px; }
+  #clock {
+    font-size: 104px; font-weight: 700; line-height: 1; letter-spacing: 2px;
+    font-variant-numeric: tabular-nums; margin: 6px 0 10px;
+  }
+  #clock.low { color: var(--danger); text-shadow: 0 0 1px #000; }
+  #clock.idle { opacity: .55; }
+  .bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.35); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  #state { font-size: 16px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; min-height: 20px; }
 
-        .brand-title h1 {
-            font-size: 1.75rem;
-            font-weight: 900;
-            letter-spacing: 1.2px;
-            color: var(--accent-pink);
-            text-shadow: 0 0 12px rgba(255, 43, 180, 0.4);
-            text-transform: uppercase;
-        }
+  body.view-unmod main { display: none; }
+  body.view-unmod footer { flex: 1; align-items: center; justify-content: center; flex-direction: column; }
+  body.view-unmod #timer { width: min(900px, 90vw); padding: 40px 48px; text-align: center; }
+  body.view-unmod #clock { font-size: min(30vw, 300px); }
+  body.view-unmod #timer .who { justify-content: center; }
 
-        .brand-title span {
-            font-size: 0.85rem;
-            font-weight: 700;
-            letter-spacing: 2px;
-            color: var(--text-sub);
-            text-transform: uppercase;
-        }
+  .status { order: -1; margin-right: auto; text-align: left; color: var(--muted); font-size: 16px; line-height: 1.6; }
+  .pill { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--card-line); }
+  .pill.off { color: var(--danger); border-color: var(--danger); }
+  body.view-unmod .status { position: fixed; left: 28px; bottom: 20px; }
 
-        .header-controls {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .select-wrapper {
-            position: relative;
-        }
-
-        select {
-            appearance: none;
-            background: #242426;
-            color: #FFF21A;
-            border: 1.5px solid var(--card-border);
-            border-radius: 10px;
-            padding: 0.6rem 2.5rem 0.6rem 1.2rem;
-            font-size: 1.1rem;
-            font-weight: 700;
-            font-family: "Rubik", sans-serif;
-            cursor: pointer;
-            outline: none;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        select:focus {
-            border-color: var(--accent-pink);
-            box-shadow: 0 0 15px rgba(255, 43, 180, 0.3);
-        }
-
-        .select-wrapper::after {
-            content: "?";
-            position: absolute;
-            right: 1.1rem;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--accent-pink);
-            font-size: 0.75rem;
-            pointer-events: none;
-        }
-
-        /* Main Container & Multi-column Grid */
-        main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-
-        #empty-state {
-            margin: auto;
-            text-align: center;
-            padding: 3rem 1.5rem;
-            color: var(--text-sub);
-        }
-
-        #empty-state svg {
-            width: 60px;
-            height: 60px;
-            stroke: var(--accent-pink);
-            margin-bottom: 1rem;
-            opacity: 0.7;
-        }
-
-        #empty-state h2 {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--text-main);
-            margin-bottom: 0.5rem;
-        }
-
-        #empty-state p {
-            font-size: 0.95rem;
-            max-width: 420px;
-            margin: 0 auto;
-        }
-
-        /* Multi-column grid that fills horizontally across the screen */
-        #gsl-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 0.75rem 1rem;
-            width: 100%;
-            align-content: start;
-        }
-
-        .speaker-card {
-            display: flex;
-            align-items: center;
-            gap: 0.85rem;
-            background: var(--card-bg);
-            border: 1.5px solid var(--card-border);
-            border-radius: 12px;
-            padding: 0.6rem 0.85rem;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-            transition: transform 0.15s ease, border-color 0.15s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .speaker-card:hover {
-            transform: translateY(-2px);
-            border-color: #3a3a3c;
-        }
-
-        /* Top speaker highlight */
-        .speaker-card.current-speaker {
-            border: 1.5px solid var(--accent-green);
-            background: linear-gradient(135deg, rgba(255, 43, 180, 0.15) 0%, rgba(182, 255, 26, 0.12) 100%);
-            box-shadow: 0 0 16px rgba(182, 255, 26, 0.35);
-        }
-
-        .speaker-card.current-speaker::before {
-            content: "CURRENT";
-            position: absolute;
-            top: 3px;
-            right: 8px;
-            font-size: 0.6rem;
-            font-weight: 800;
-            color: var(--accent-green);
-            letter-spacing: 1px;
-        }
-
-        .speaker-index {
-            flex-shrink: 0;
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
-            background: #2c2c2e;
-            color: #FFFFFF;
-            font-weight: 800;
-            font-size: 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .speaker-card.current-speaker .speaker-index {
-            background: linear-gradient(135deg, #B6FF1A 0%, #00E5FF 100%);
-            color: #121212;
-            box-shadow: 0 2px 6px rgba(182, 255, 26, 0.45);
-        }
-
-        .speaker-name {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: var(--text-main);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            letter-spacing: 0.3px;
-        }
-
-        .speaker-card.current-speaker .speaker-name {
-            color: #FFFFFF;
-            font-size: 1.15rem;
-            font-weight: 700;
-        }
-
-        /* Footer */
-        footer {
-            margin-top: 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.8rem;
-            color: var(--text-sub);
-            border-top: 1px solid var(--card-border);
-            padding-top: 0.75rem;
-        }
-    </style>
+  /* --- committee picker --- */
+  #picker {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.92); display: none;
+    place-content: center; gap: 16px; text-align: center; z-index: 10;
+  }
+  #picker.open { display: grid; }
+  #picker h2 { font-size: 32px; }
+  #picker .choices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 900px; }
+  #picker button {
+    font: inherit; font-size: 22px; font-weight: 700; color: var(--ink); cursor: pointer;
+    background: var(--card); border: 1px solid var(--card-line); border-radius: 16px; padding: 14px 24px;
+  }
+  #picker button:hover, #picker button:focus { background: var(--pink); outline: none; }
+  #picker p { color: var(--muted); }
+</style>
 </head>
 <body>
-    <header>
-        <div class="brand-section">
-            <img src="/static/logo_2026.webp" alt="Mumbai MUN" class="brand-logo" onerror="this.src='/static/logo.png'; this.onerror=null;">
-            <div class="brand-title">
-                <h1>Mumbai MUN</h1>
-                <span>SPEAKER'S LIST</span>
-            </div>
-        </div>
+  <header>
+    <div class="wordmark">MUMBAI <b>MUN&rsquo;26</b></div>
+    <div class="committee" id="committee" title="Change committee (C)">&nbsp;</div>
+    <div class="view-label" id="view-label">General Speakers&rsquo; List</div>
+  </header>
 
-        <div class="header-controls">
-            <div class="select-wrapper">
-                <select id="committee-select">
-                    <option value="">Select Committee</option>
-                </select>
-            </div>
-        </div>
-    </header>
+  <main>
+    <div id="grid"></div>
+    <div class="empty" id="empty">
+      <h2>No speakers yet</h2>
+      <p>The EB adds speakers from EB Tools in the Delego app.</p>
+    </div>
+  </main>
 
-    <main>
-        <div id="empty-state">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                <line x1="8" y1="21" x2="16" y2="21"></line>
-                <line x1="12" y1="17" x2="12" y2="21"></line>
-            </svg>
-            <h2>No Speakers Added</h2>
-            <p>Select a committee from the dropdown or add speakers on the EB Tools app to begin.</p>
-        </div>
+  <footer>
+    <section id="timer">
+      <div class="who" id="who"></div>
+      <div id="clock" class="idle">00:00</div>
+      <div class="bar"><i id="bar"></i></div>
+      <div id="state"></div>
+    </section>
+    <div class="status">
+      <div id="count">0 speakers</div>
+      <span class="pill off" id="conn">Connecting…</span>
+    </div>
+  </footer>
 
-        <div id="gsl-grid" style="display: none;"></div>
-    </main>
+  <div id="picker">
+    <h2>Choose this room's committee</h2>
+    <div class="choices" id="choices"></div>
+    <p id="picker-note">Loading committees…</p>
+  </div>
 
-    <footer>
-        <span>MUMBAI MUN 2026</span>
-        <span id="speaker-count">0 Speakers Listed</span>
-    </footer>
+<script>
+  // Plain ES5 on purpose: if this browser can't run the board script below (too old),
+  // say so on screen instead of showing an empty board forever.
+  setTimeout(function () {
+    if (window.boardStarted) return;
+    var d = document.createElement("div");
+    d.setAttribute("style", "position:fixed;top:0;right:0;bottom:0;left:0;background:#000;color:#fff;" +
+      "font:28px Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;" +
+      "text-align:center;padding:40px;z-index:99");
+    d.textContent = "This browser is too old to show the speakers' list. Open this page in an up-to-date Chrome, Edge or Firefox.";
+    document.body.appendChild(d);
+  }, 3000);
+</script>
+<script>
+(() => {
+  const FLAG_BASE = "https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/4x3/";
+  const PERSON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5Z"/></svg>';
+  const VIEW_LABELS = { gsl: "General Speakers’ List", mod: "Moderated Caucus", unmod: "Unmoderated Caucus" };
+  const STORE_KEY = "delegoBoardCommittee";
 
-    <script>
-        let ws = null;
-        const select = document.getElementById("committee-select");
-        const grid = document.getElementById("gsl-grid");
-        const emptyState = document.getElementById("empty-state");
-        const speakerCount = document.getElementById("speaker-count");
+  const $ = (id) => document.getElementById(id);
 
-        fetch("/public/committees")
-            .then(res => res.json())
-            .then(committees => {
-                committees.forEach(c => {
-                    const option = document.createElement("option");
-                    option.value = c.id;
-                    option.textContent = c.name;
-                    select.appendChild(option);
-                });
+  // Element.replaceChildren is missing on older TV/panel browsers (Chrome < 86).
+  function setChildren(el, kids) {
+    el.textContent = "";
+    kids.forEach((k) => el.appendChild(k));
+  }
+  let committees = [];
+  let committeeId = null;
+  let state = null;
+  let offset = 0;           // server clock minus ours, in ms
+  let ws = null;
+  let retry = 0;
+  let retryTimer = null;
+  let session = 0;          // bumps when the committee changes, to ignore old sockets
+  let lastClockText = "";
+  let wakeLock = null;
+  let live = false;         // the socket is open and sending
+  let lastFrameAt = 0;      // performance.now() of the last socket frame
+  let connectAt = 0;        // performance.now() of the last connection attempt
+  const STALE_MS = 45000;   // the server sends the state at least every 20 s
 
-                if (committees.length > 0) {
-                    select.value = committees[0].id;
-                    connectCommittee(committees[0].id);
-                }
-            })
-            .catch(err => {
-                console.error("Failed to load committees:", err);
-            });
+  // ---------- storage (may be blocked) ----------
+  const store = {
+    get() { try { return localStorage.getItem(STORE_KEY); } catch (e) { return null; } },
+    set(v) { try { localStorage.setItem(STORE_KEY, v); } catch (e) {} },
+  };
 
-        select.addEventListener("change", (e) => {
-            const committeeId = e.target.value;
-            connectCommittee(committeeId);
-        });
+  // ---------- committees & picker ----------
+  async function loadCommittees() {
+    try {
+      const res = await fetch("/public/committees");
+      committees = await res.json();
+    } catch (e) {
+      $("picker-note").textContent = "Could not load committees. Retrying…";
+      setTimeout(loadCommittees, 4000);
+      return;
+    }
+    const choices = $("choices");
+    setChildren(choices, committees.map((c) => {
+      const b = document.createElement("button");
+      b.textContent = c.name;
+      b.addEventListener("click", () => choose(c.id));
+      return b;
+    }));
+    $("picker-note").textContent = "Tip: open this page with ?committee=<id> to skip this step. Press C to switch later.";
 
-        function connectCommittee(committeeId) {
-            if (ws) ws.close();
-            renderList([]);
-            if (!committeeId) return;
+    const fromUrl = new URLSearchParams(location.search).get("committee");
+    const wanted = Number(fromUrl || store.get());
+    if (committees.some((c) => c.id === wanted)) choose(wanted);
+    else openPicker();
+  }
 
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws/committees/${committeeId}/gsl`);
+  function openPicker() { $("picker").classList.add("open"); }
+  function closePicker() { if (committeeId != null) $("picker").classList.remove("open"); }
 
-            ws.onmessage = (event) => {
-                try {
-                    const gslList = JSON.parse(event.data);
-                    renderList(gslList);
-                } catch (e) {
-                    console.error("Error parsing GSL list:", e);
-                }
-            };
-        }
+  function choose(id) {
+    committeeId = id;
+    store.set(String(id));
+    const url = new URL(location.href);
+    url.searchParams.set("committee", id);
+    history.replaceState(null, "", url);
+    const c = committees.find((x) => x.id === id);
+    $("committee").textContent = c ? c.name : "";
+    document.title = (c ? c.name + " · " : "") + "Speakers' List";
+    $("picker").classList.remove("open");
+    state = null;
+    render();
+    connect();
+  }
 
-        function renderList(list) {
-            grid.innerHTML = "";
-            speakerCount.textContent = `${list.length} Speaker${list.length === 1 ? "" : "s"} Listed`;
+  $("committee").addEventListener("click", openPicker);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "c" || e.key === "C") openPicker();
+    if (e.key === "Escape") closePicker();
+  });
 
-            if (!list || list.length === 0) {
-                emptyState.style.display = "block";
-                grid.style.display = "none";
-                return;
-            }
+  // ---------- live connection ----------
+  // A frame from the socket or from GET /floor; older versions are ignored.
+  function applyFrame(frame, mine) {
+    if (mine !== session || !frame || frame.type !== "state") return;
+    offset = frame.server_now - Date.now();
+    if (state && frame.state.version < state.version) return;
+    state = frame.state;
+    render();
+  }
 
-            emptyState.style.display = "none";
-            grid.style.display = "grid";
+  // Read the floor over HTTP: on (re)connect, every 10 s while the socket is down, and
+  // every 60 s while it is up as a cross-check: if HTTP is ahead of the socket, the socket
+  // is missing updates, so reconnect.
+  async function refresh(mine) {
+    try {
+      const res = await fetch(`/committees/${committeeId}/floor`, { cache: "no-store" });
+      if (!res.ok) return;
+      const frame = await res.json();
+      const behind = live && state && frame && frame.state && frame.state.version > state.version;
+      applyFrame(frame, mine);
+      // HTTP works but the socket is behind, or still not up 10 s after trying (an attempt
+      // made while the network was down can hang): try the socket again now.
+      const stuck = !live && performance.now() - connectAt > 10000;
+      if ((behind || stuck) && mine === session) connect();
+    } catch (e) {}
+  }
+  let ticks = 0;
+  setInterval(() => {
+    if (committeeId == null) return;
+    ticks++;
+    if (!live || ticks % 6 === 0) refresh(session);
+  }, 10000);
 
-            list.forEach((country, index) => {
-                const card = document.createElement("div");
-                card.className = "speaker-card" + (index === 0 ? " current-speaker" : "");
+  // A link can die without closing (Wi-Fi drop, roaming, an expired NAT entry): the board
+  // would keep showing "Live" with a frozen list. No frame for 45 s means dead: reconnect.
+  // This also catches a connection attempt that hangs.
+  setInterval(() => {
+    if (committeeId != null && performance.now() - lastFrameAt > STALE_MS) connect();
+  }, 5000);
 
-                const idx = document.createElement("div");
-                idx.className = "speaker-index";
-                idx.textContent = index + 1;
+  function connect() {
+    const mine = ++session;
+    clearTimeout(retryTimer);
+    if (ws) { ws.onclose = null; ws.close(); }
+    setConn(false);
+    lastFrameAt = connectAt = performance.now(); // a grace period for the new socket
+    refresh(mine);
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(`${proto}//${location.host}/ws/committees/${committeeId}/floor`);
+    ws.onmessage = (event) => {
+      if (mine !== session) return;
+      let frame;
+      try { frame = JSON.parse(event.data); } catch (e) { return; }
+      if (!frame || frame.type !== "state") return;
+      retry = 0;
+      lastFrameAt = performance.now();
+      setConn(true);
+      applyFrame(frame, mine);
+    };
+    ws.onclose = (event) => {
+      if (mine !== session) return;
+      setConn(false);
+      if (event.code === 4404) { openPicker(); return; }
+      const wait = Math.min(16000, 1000 * 2 ** retry++);
+      retryTimer = setTimeout(connect, wait);
+    };
+  }
 
-                const name = document.createElement("div");
-                name.className = "speaker-name";
-                name.textContent = country;
+  function setConn(isLive) {
+    live = isLive;
+    const el = $("conn");
+    el.textContent = isLive ? "Live" : "Reconnecting…";
+    el.classList.toggle("off", !isLive);
+  }
 
-                card.appendChild(idx);
-                card.appendChild(name);
-                grid.appendChild(card);
-            });
-        }
-    </script>
+  // ---------- rendering ----------
+  // A flag; for a person, their party badge (PSC) or else a person icon.
+  function flagEl(code, tag) {
+    if (!code && tag) {
+      const b = document.createElement("span");
+      b.className = "tag";
+      b.textContent = tag;
+      return b;
+    }
+    if (!code) {
+      const p = document.createElement("span");
+      p.className = "person";
+      p.innerHTML = PERSON_SVG; // a constant, never user data
+      return p;
+    }
+    const img = document.createElement("img");
+    img.className = "flag";
+    img.alt = "";
+    img.src = FLAG_BASE + encodeURIComponent(code) + ".svg";
+    img.onerror = () => img.replaceWith(flagEl(null, null));
+    return img;
+  }
+
+  function currentSpeaker(listName) {
+    const entries = state.lists[listName].entries;
+    const t = state.timer;
+    if (t.kind === "speaker" && t.list === listName) {
+      const timed = entries.find((e) => e.id === t.speaker_id);
+      if (timed) return timed;
+    }
+    return entries[0] || null;
+  }
+
+  function render() {
+    const view = state ? state.display : "gsl";
+    document.body.classList.toggle("view-mod", view === "mod");
+    document.body.classList.toggle("view-unmod", view === "unmod");
+    $("view-label").textContent = VIEW_LABELS[view] || "";
+
+    const listName = view === "unmod" ? null : view;
+    const entries = state && listName ? state.lists[listName].entries : [];
+    const current = state && listName ? currentSpeaker(listName) : null;
+
+    const grid = $("grid");
+    setChildren(grid, entries.map((e, i) => {
+      const card = document.createElement("div");
+      card.className = "speaker" + (current && e.id === current.id ? " current" : "");
+      const num = document.createElement("span");
+      num.className = "num";
+      num.textContent = i + 1;
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = e.name;
+      card.append(num, flagEl(e.code, e.tag), name);
+      return card;
+    }));
+    $("empty").style.display = entries.length || !listName ? "none" : "grid";
+    $("count").textContent = listName
+      ? `${entries.length} speaker${entries.length === 1 ? "" : "s"}`
+      : "";
+    fit();
+
+    // Who the timer is for.
+    const who = $("who");
+    setChildren(who, []);
+    const t = state ? state.timer : null;
+    if (view === "unmod") {
+      who.append(label("UNMODERATED CAUCUS"));
+    } else if (current) {
+      const timing = t && t.kind === "speaker" && t.list === listName;
+      who.append(label(timing ? "NOW SPEAKING" : "NEXT"), flagEl(current.code, current.tag), nameEl(current.name));
+    } else {
+      who.append(label("SPEAKING TIME"));
+    }
+    lastClockText = "";
+    tick();
+  }
+
+  function label(text) {
+    const s = document.createElement("span");
+    s.className = "label";
+    s.textContent = text;
+    return s;
+  }
+  function nameEl(text) {
+    const s = document.createElement("span");
+    s.className = "name";
+    s.textContent = text;
+    return s;
+  }
+
+  // Shrink the cards when the list doesn't fit the screen.
+  function fit() {
+    const grid = $("grid");
+    const main = grid.parentElement;
+    grid.classList.remove("dense", "denser");
+    if (main.scrollHeight > main.clientHeight) grid.classList.add("dense");
+    if (main.scrollHeight > main.clientHeight) grid.classList.add("denser");
+  }
+
+  // ---------- the clock ----------
+  function timerNumbers() {
+    if (!state) return { ms: 0, total: 0, mode: "idle" };
+    const t = state.timer;
+    const view = state.display;
+    const forView = view === "unmod" ? t.kind === "unmod" : t.kind === "speaker" && t.list === view;
+    if (!forView || t.kind === "idle") {
+      const secs = view === "unmod" ? 0 : state.lists[view].speaker_seconds;
+      return { ms: secs * 1000, total: secs * 1000, mode: "idle" };
+    }
+    const total = t.duration * 1000;
+    if (t.running) {
+      const ms = Math.max(0, t.ends_at - (Date.now() + offset));
+      return { ms, total, mode: ms > 0 ? "running" : "done" };
+    }
+    return { ms: t.remaining_ms, total, mode: t.remaining_ms > 0 ? "paused" : "done" };
+  }
+
+  function fmt(ms) {
+    const s = Math.ceil(ms / 1000);
+    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function tick() {
+    const { ms, total, mode } = timerNumbers();
+    const text = fmt(ms);
+    const clock = $("clock");
+    if (text !== lastClockText) {
+      lastClockText = text;
+      clock.textContent = text;
+      clock.classList.toggle("idle", mode === "idle");
+      clock.classList.toggle("low", (mode === "running" || mode === "paused" || mode === "done") && ms <= 10000);
+      $("state").textContent = { paused: "PAUSED", done: "TIME", running: "", idle: "" }[mode];
+    }
+    $("bar").style.width = mode === "idle" || !total ? "0%" : `${(100 * (total - ms)) / total}%`;
+  }
+
+  function loop() { tick(); requestAnimationFrame(loop); }
+
+  // ---------- keep the screen on ----------
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") keepAwake();
+  });
+  window.addEventListener("resize", fit);
+
+  keepAwake();
+  render();
+  requestAnimationFrame(loop);
+  loadCommittees();
+  window.boardStarted = true;
+})();
+</script>
 </body>
 </html>

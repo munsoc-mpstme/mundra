@@ -17,6 +17,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -57,6 +58,7 @@ engine = create_async_engine(
     _settings.database_url,
     pool_size=10,
     max_overflow=10,
+    pool_timeout=10,  # wait at most this long for a free connection
     pool_pre_ping=True,
     connect_args=_settings.db_connect_args,
 )
@@ -422,3 +424,38 @@ class ChatMessageRow(Base):
     body: Mapped[str] = mapped_column(server_default="")
     payload: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = _created_at()
+
+
+class CommitteeFloorRow(Base):
+    """A committee's live floor for EB Tools: its speakers' lists and timer, as one JSON
+    document (shape in floor.new_state). One row per committee, written on every change."""
+
+    __tablename__ = "committee_floors"
+
+    committee_id: Mapped[int] = mapped_column(
+        ForeignKey("committees.id", ondelete="CASCADE"), primary_key=True
+    )
+    state: Mapped[dict] = mapped_column(JSONB)
+    updated_by: Mapped[str | None]
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CommitteePortfolioRow(Base):
+    """One portfolio of a committee's official matrix, in sheet order. EB Tools offers only
+    these for that committee (plus a free "Add other"). code is the flag (ISO alpha-2);
+    PSC members have none, but a party (detail) and its abbreviation (tag) for a badge."""
+
+    __tablename__ = "committee_portfolios"
+    __table_args__ = (UniqueConstraint("committee_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    committee_id: Mapped[int] = mapped_column(
+        ForeignKey("committees.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int]
+    name: Mapped[str]
+    code: Mapped[str | None]
+    tag: Mapped[str | None]
+    detail: Mapped[str | None]
