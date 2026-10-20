@@ -79,12 +79,16 @@ class Settings(BaseSettings):
 
     @property
     def db_connect_args(self) -> dict:
-        """Extra asyncpg connect args. A managed host (DATABASE_URL set) needs SSL;
+        """Extra asyncpg connect args: connect and query time limits for every host. A
+        managed host (DATABASE_URL set) also needs SSL;
         statement_cache_size=0 keeps it working behind a transaction pooler (pgbouncer),
         which cannot reuse prepared statements. Local docker Postgres needs neither."""
+        # Time limits, so a stalled database link fails a request within seconds instead of
+        # holding it (and a pool connection) for minutes.
+        limits = {"timeout": 10, "command_timeout": 15}
         if self.database_url_raw:
-            return {"ssl": "require", "statement_cache_size": 0}
-        return {}
+            return {"ssl": "require", "statement_cache_size": 0, **limits}
+        return limits
 
 @lru_cache
 def get_settings() -> Settings:

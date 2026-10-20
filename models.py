@@ -1,10 +1,14 @@
+import re
+import unicodedata
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     AwareDatetime,
     BaseModel,
+    ConfigDict,
     EmailStr,
+    Field,
     field_validator,
     model_validator,
 )
@@ -279,3 +283,147 @@ class FlaggedScan(BaseModel):
     meal: Meal
     scanned_by: str
     at: datetime
+
+
+# --- Committee floor (EB Tools: speakers' lists and timer, see floor.py) ----------------
+
+FloorList = Literal["gsl", "mod"]
+FloorView = Literal["gsl", "mod", "unmod"]
+FloorSeconds = Annotated[int, Field(ge=5, le=5999)]  # up to 99:59
+_FLAG_CODE = re.compile(r"^[a-z]{2}(-[a-z]{2,4})?$")  # ISO 3166 alpha-2, or e.g. gb-sct
+
+
+class _FloorOp(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class FloorAdd(_FloorOp):
+    """Add a portfolio to the end of a list. code is its flag (ISO alpha-2, lower case);
+    null for a person, who is shown with a person icon."""
+
+    op: Literal["add"]
+    list: FloorList
+    name: str
+    code: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        if any(unicodedata.category(ch) in ("Cc", "Cs") for ch in value):
+            raise ValueError("The name has control characters")
+        value = " ".join(value.split())
+        if not 1 <= len(value) <= 80:
+            raise ValueError("The name must be 1 to 80 characters")
+        return value
+
+    @field_validator("code")
+    @classmethod
+    def check_code(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        value = value.lower()
+        if not _FLAG_CODE.match(value):
+            raise ValueError("Not a flag code")
+        return value
+
+
+class FloorRemove(_FloorOp):
+    op: Literal["remove"]
+    list: FloorList
+    entry_id: str = Field(max_length=32)
+
+
+class FloorMove(_FloorOp):
+    """Move an entry so it ends up at to_index (counted after it is taken out)."""
+
+    op: Literal["move"]
+    list: FloorList
+    entry_id: str = Field(max_length=32)
+    to_index: int = Field(ge=0)
+
+
+class FloorClear(_FloorOp):
+    op: Literal["clear"]
+    list: FloorList
+
+
+class FloorSetSpeakerTime(_FloorOp):
+    op: Literal["set_speaker_time"]
+    list: FloorList
+    seconds: FloorSeconds
+
+
+class FloorStartSpeaker(_FloorOp):
+    """Time the current speaker of a list. replace=True stops another running timer."""
+
+    op: Literal["start_speaker"]
+    list: FloorList
+    replace: bool = False
+
+
+class FloorStartUnmod(_FloorOp):
+    op: Literal["start_unmod"]
+    seconds: FloorSeconds
+    replace: bool = False
+
+
+class FloorPause(_FloorOp):
+    op: Literal["pause"]
+
+
+class FloorResume(_FloorOp):
+    op: Literal["resume"]
+
+
+class FloorReset(_FloorOp):
+    op: Literal["reset"]
+
+
+class FloorNext(_FloorOp):
+    """The speaker the EB named is done (finished early or yielded): take them off the
+    list. 409 if they are already gone (their time ran out, or the other EB moved on)."""
+
+    op: Literal["next"]
+    list: FloorList
+    entry_id: str = Field(max_length=32)
+
+
+class FloorSetDisplay(_FloorOp):
+    op: Literal["set_display"]
+    view: FloorView
+
+
+FloorOp = Annotated[
+    FloorAdd
+    | FloorRemove
+    | FloorMove
+    | FloorClear
+    | FloorSetSpeakerTime
+    | FloorStartSpeaker
+    | FloorStartUnmod
+    | FloorPause
+    | FloorResume
+    | FloorReset
+    | FloorNext
+    | FloorSetDisplay,
+    Field(discriminator="op"),
+]
+
+
+class CommitteePortfolio(BaseModel):
+    """One portfolio of a committee's matrix. code is the flag (ISO alpha-2); a person
+    (PSC member) has none but a party (detail) and its abbreviation (tag)."""
+
+    name: str
+    code: str | None = None
+    tag: str | None = None
+    detail: str | None = None
+
+
+class FloorFrame(BaseModel):
+    """The whole floor, as pushed over the socket and returned by every op. state is
+    floor.new_state()'s shape; server_now (epoch ms) lets clients correct their clocks."""
+
+    type: Literal["state"] = "state"
+    state: dict
+    server_now: int

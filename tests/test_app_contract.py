@@ -1,7 +1,8 @@
 """The Delego app's contract: exactly the requests and responses the shipped app uses.
 
 These replay what lib/auth/capabilities.dart, lib/api/scan_queue.dart,
-lib/Pages/Qr_Page/Qr_scanner.dart and lib/Pages/Chat_Page/committee_chat_page.dart send,
+lib/Pages/Qr_Page/Qr_scanner.dart, lib/Pages/Chat_Page/committee_chat_page.dart and
+lib/api/floor_client.dart (EB Tools) send,
 so the backend and the app stay compatible.
 """
 
@@ -401,3 +402,48 @@ def test_admin_builds_a_hospitality_team_and_its_member_can_scan(client):
     removed = client.delete(f"/teams/{team_id}/members/{member}", headers=h)
     assert removed.status_code == 200
     assert scan(client, member, delegate_id, "lunch").status_code == 403
+
+
+# ---- EB Tools: the committee floor (lib/api/floor_client.dart) -------------------------
+
+
+def test_a_plain_eb_runs_the_floor_the_way_the_app_does(client):
+    """An `eb`-role user has eb.tools, picks a committee from /public/committees (no
+    /committees, which needs chat access) and drives the floor with ops."""
+    headers = auth_header(make(role="eb"))
+    me = client.get("/delegates/me", headers=headers).json()
+    assert "eb.tools" in me["permissions"]
+
+    committees = client.get("/public/committees").json()
+    cid = next(c["id"] for c in committees if c["name"] == "IPC")
+
+    # The app loads the committee's matrix for its dropdown ([] for IPC: free entry).
+    unsc = next(c["id"] for c in committees if c["name"] == "UNSC")
+    matrix = client.get(f"/public/committees/{unsc}/portfolios").json()
+    assert set(matrix[0]) == {"name", "code", "tag", "detail"}
+    assert client.get(f"/public/committees/{cid}/portfolios").json() == []
+
+    def send(body):
+        res = client.post(f"/committees/{cid}/floor/ops", json=body, headers=headers)
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    send({"op": "clear", "list": "gsl"})
+    send({"op": "reset"})
+    send({"op": "add", "list": "gsl", "name": "India", "code": "in"})
+    frame = send({"op": "add", "list": "gsl", "name": "Ms Rao", "code": None})
+    assert frame["type"] == "state" and isinstance(frame["server_now"], int)
+    entry = frame["state"]["lists"]["gsl"]["entries"][-1]
+    assert set(entry) == {"id", "name", "code", "tag"}
+
+    frame = send({"op": "start_speaker", "list": "gsl", "replace": False})
+    timer = frame["state"]["timer"]
+    assert set(timer) == {
+        "kind", "list", "speaker_id", "duration", "running", "ends_at", "remaining_ms"
+    }
+    send({"op": "pause"})
+    send({"op": "reset"})
+    send({"op": "clear", "list": "gsl"})
+
+    with client.websocket_connect(f"/ws/committees/{cid}/floor") as ws:
+        assert ws.receive_json()["state"]["lists"]["gsl"]["entries"] == []
