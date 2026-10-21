@@ -102,7 +102,7 @@ _WITH_EXPERIENCES = selectinload(db.DelegateRow.experiences)
 
 async def add_user(user: models.User) -> models.User:
     async with db.SessionLocal() as session, session.begin():
-        session.add(db.UserRow(email=user.email, password=user.password))
+        session.add(db.UserRow(email=user.email, password=user.password, role="delegate"))
     return user
 
 
