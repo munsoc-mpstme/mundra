@@ -145,3 +145,27 @@ def test_admins_cannot_delete_their_own_account_but_delegates_can(client):
     assert client.delete("/account", headers=auth_header(delegate)).status_code == 200
     # the deleted account's token stops working straight away
     assert client.get("/delegates/me", headers=auth_header(delegate)).status_code == 403
+
+
+def test_deleting_an_account_removes_the_person_and_their_data(client):
+    """Apple 5.1.1(v): deleting the account deletes the data stored with it, not only
+    the login."""
+    import asyncio
+
+    import database
+    import models
+
+    email = asyncio.run(create_user())
+    delegate = asyncio.run(database.get_delegate_by_email(email))
+    asyncio.run(database.add_mm_delegate(models.MMDelegate(**delegate.model_dump())))
+
+    assert client.delete("/account", headers=auth_header(email)).status_code == 200
+    assert asyncio.run(database.get_delegate_by_email(email)) is None
+    assert asyncio.run(database.get_mm_delegate_by_id(delegate.id)) is None
+    assert asyncio.run(database.get_user_by_email(email)) is None
+
+
+def test_the_delete_account_page_is_public(client):
+    res = client.get("/delete-account")
+    assert res.status_code == 200
+    assert "Delete your Delego account" in res.text

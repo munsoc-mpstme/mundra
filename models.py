@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -291,6 +291,65 @@ class MealCount(BaseModel):
     non_veg: int = 0
     jain: int = 0
     unspecified: int = 0
+
+
+class Badge(BaseModel):
+    """A delegate's own food badge: the string their QR encodes, and what it says."""
+
+    qr: str
+    delegate_id: str
+    name: str
+    food_preference: FoodPreference | None = None
+
+
+class MealWindows(BaseModel):
+    """When each meal starts, conference-local HH:MM."""
+
+    breakfast: str = "00:00"
+    lunch: str
+    high_tea: str
+
+
+class ScanContext(BaseModel):
+    """What a scanner needs so the operator never picks the day or meal: today's event
+    day and current meal, plus the dates and meal windows to work them out offline."""
+
+    event_id: int | None = None
+    # False when no event's dates cover today: scans still work, but are filed under the
+    # calendar date instead of day 1, 2 or 3. A head should set the event dates.
+    event_dates_set: bool
+    day: int | None = None
+    meal: Meal
+    meal_windows: MealWindows
+    event_dates: list[date] = []
+    utc_offset_minutes: int
+    server_time: datetime
+
+
+class BadgeLookup(BaseModel):
+    """A scanned badge, before (or instead of) serving a plate: who it is, what they eat,
+    and whether they already had the current meal."""
+
+    delegate_id: str
+    name: str
+    food_preference: FoodPreference | None = None
+    food_notes: str = ""
+    committee: str = ""
+    day: int
+    meal: Meal
+    collected_today: list[Meal] = []
+    already_collected: bool
+
+
+class DelegateMatch(BaseModel):
+    """A name-search result, for serving a delegate who cannot show their QR."""
+
+    delegate_id: str
+    name: str
+    email_hint: str
+    committee: str = ""
+    country: str = ""
+    food_preference: FoodPreference | None = None
 
 
 class FlaggedScan(BaseModel):

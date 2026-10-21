@@ -6,10 +6,12 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 import app as app_module
+import config
 import database
 import db
 import models
 import permissions
+import utils
 from helpers import auth_header
 from test_teams import add_membership, make, make_event, make_team
 
@@ -290,3 +292,131 @@ def test_my_mm_delegate_returns_name_and_preference(client):
     assert res.status_code == 200
     assert res.json()["id"] == delegate_id
     assert res.json()["food_preference"] == "veg"
+
+
+# --- the badge QR: id and diet in the code, day and meal from the clock -----------
+
+
+def test_the_badge_code_carries_the_id_and_diet(client):
+    email, delegate_id = make_mm(food_preference="jain")
+    res = client.get("/mumbaimun/badge", headers=auth_header(email))
+    assert res.status_code == 200
+    assert res.json()["qr"] == f"DELEGO1:{delegate_id}:J"
+    assert utils.parse_badge(res.json()["qr"]) == (delegate_id, "jain")
+
+    png = client.get("/mumbaimun/badge/qr", headers=auth_header(email))
+    assert png.status_code == 200
+    assert png.headers["content-type"] == "image/png"
+    assert png.content.startswith(b"\x89PNG")
+
+
+def test_a_badge_with_no_diet_and_an_old_plain_id_both_parse():
+    assert utils.badge_payload("abc", None) == "DELEGO1:abc:-"
+    assert utils.parse_badge("DELEGO1:abc:-") == ("abc", None)
+    assert utils.parse_badge(" abc ") == ("abc", None)
+
+
+def test_the_meal_comes_from_the_local_time():
+    on = lambda h, m: datetime(2026, 10, 30, h, m, tzinfo=IST)  # noqa: E731
+    assert database.current_meal(on(8, 30)) == "breakfast"
+    assert database.current_meal(on(10, 59)) == "breakfast"
+    assert database.current_meal(on(11, 0)) == "lunch"
+    assert database.current_meal(on(15, 29)) == "lunch"
+    assert database.current_meal(on(15, 30)) == "hitea"
+    # 06:00 UTC is 11:30 IST: lunch, not breakfast
+    assert database.current_meal(datetime(2026, 10, 30, 6, 0, tzinfo=timezone.utc)) == "lunch"
+
+
+def test_a_scan_with_no_meal_uses_the_current_one(client, food_event):
+    hospi = hospitality_member()
+    _, delegate_id = make_mm(food_preference="veg")
+    res = client.post(
+        "/food/scans",
+        data={"delegate_id": f"DELEGO1:{delegate_id}:V"},
+        headers=auth_header(hospi),
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["result"] == "served"
+    assert body["delegate_id"] == delegate_id
+    assert body["meal"] == database.current_meal()
+    assert body["diet"] == "veg"
+
+
+def test_the_context_tells_the_scanner_the_day_and_meal(client, food_event):
+    hospi = hospitality_member()
+    res = client.get("/food/context", headers=auth_header(hospi))
+    assert res.status_code == 200
+    body = res.json()
+    assert body["event_dates_set"] is True
+    assert body["event_id"] == food_event
+    assert body["day"] == 2  # the fixture's event started yesterday
+    assert body["meal"] == database.current_meal()
+    assert body["meal_windows"]["lunch"] == config.get_settings().meal_lunch_from
+    assert len(body["event_dates"]) == 3
+
+
+def test_the_context_needs_the_food_permission(client, food_event):
+    assert client.get("/food/context", headers=auth_header(make())).status_code == 403
+
+
+def test_a_lookup_shows_diet_and_what_was_collected_without_serving(client, food_event):
+    hospi = hospitality_member()
+    _, delegate_id = make_mm(food_preference="non_veg")
+    code = f"DELEGO1:{delegate_id}:N"
+
+    before = client.get(
+        "/food/lookup", params={"code": code, "meal": "lunch"}, headers=auth_header(hospi)
+    ).json()
+    assert before["food_preference"] == "non_veg"
+    assert before["already_collected"] is False
+    assert before["collected_today"] == []
+
+    client.post(
+        "/food/scans", data={"delegate_id": code, "meal": "lunch"}, headers=auth_header(hospi)
+    )
+    after = client.get(
+        "/food/lookup", params={"code": code, "meal": "lunch"}, headers=auth_header(hospi)
+    ).json()
+    assert after["already_collected"] is True
+    assert after["collected_today"] == ["lunch"]
+
+
+def test_a_lookup_of_an_unknown_badge_is_404(client, food_event):
+    res = client.get(
+        "/food/lookup", params={"code": "DELEGO1:nope:V"}, headers=auth_header(hospitality_member())
+    )
+    assert res.status_code == 404
+
+
+# --- name search, for a delegate with no phone ---------------------------------------
+
+
+async def rename(delegate_id, firstname, lastname):
+    async with db.SessionLocal() as session, session.begin():
+        row = await session.get(db.DelegateRow, delegate_id)
+        row.firstname, row.lastname = firstname, lastname
+
+
+def test_hospitality_can_find_a_delegate_by_name(client):
+    hospi = hospitality_member()
+    email, delegate_id = make_mm(food_preference="veg")
+    asyncio.run(rename(delegate_id, "Zubeida", "Qureshi"))
+    res = client.get("/food/delegates", params={"q": "zube qur"}, headers=auth_header(hospi))
+    assert res.status_code == 200
+    match = next(m for m in res.json() if m["delegate_id"] == delegate_id)
+    assert match["name"] == "Zubeida Qureshi"
+    assert match["food_preference"] == "veg"
+    assert match["email_hint"] == email[:2] + "***@example.com"
+
+
+def test_name_search_needs_the_food_permission_and_two_letters(client):
+    assert client.get("/food/delegates", params={"q": "ab"}, headers=auth_header(make())).status_code == 403
+    hospi = hospitality_member()
+    assert client.get("/food/delegates", params={"q": "a"}, headers=auth_header(hospi)).status_code == 422
+
+
+def test_name_search_treats_wildcards_literally(client):
+    hospi = hospitality_member()
+    res = client.get("/food/delegates", params={"q": "%%"}, headers=auth_header(hospi))
+    assert res.status_code == 200 and res.json() == []

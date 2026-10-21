@@ -162,6 +162,22 @@ async def delete_user(email: models.EmailStr) -> None:
             await session.delete(user)
 
 
+async def delete_account(email: models.EmailStr) -> str | None:
+    """Delete a person and everything stored about them: removing the delegate row
+    cascades to their login, Mumbai MUN details, past MUNs, meal scans and flags, and OC
+    memberships. Returns the delegate id (to clean up files), or None if there was none."""
+    async with db.SessionLocal() as session, session.begin():
+        delegate = await session.scalar(
+            select(db.DelegateRow).where(db.DelegateRow.email == email)
+        )
+        if delegate is None:
+            await session.execute(db.UserRow.__table__.delete().where(db.UserRow.email == email))
+            return None
+        delegate_id = delegate.id
+        await session.delete(delegate)
+        return delegate_id
+
+
 ####################
 # ROLES
 ####################
@@ -1031,6 +1047,112 @@ async def resolve_scan_day(now: datetime | None = None) -> tuple[int, int]:
     if event_id is None:
         raise LookupError("No event exists yet")
     return event_id, _local_date(now or datetime.now(timezone.utc)).toordinal()
+
+
+def _hhmm(raw: str) -> time:
+    hours, minutes = raw.strip().split(":")
+    return time(int(hours), int(minutes))
+
+
+def meal_windows() -> dict[str, str]:
+    settings = config.get_settings()
+    return {"breakfast": "00:00", "lunch": settings.meal_lunch_from, "high_tea": settings.meal_hitea_from}
+
+
+def current_meal(now: datetime | None = None) -> str:
+    """The meal being served at this moment, by the conference-local clock."""
+    settings = config.get_settings()
+    local = (now or datetime.now(timezone.utc)).astimezone(_event_tz()).time()
+    if local >= _hhmm(settings.meal_hitea_from):
+        return "hitea"
+    if local >= _hhmm(settings.meal_lunch_from):
+        return "lunch"
+    return "breakfast"
+
+
+async def scan_context(now: datetime | None = None) -> models.ScanContext:
+    """Today's event day and meal for the scanner, and what it needs to work them out
+    itself while offline (the event's dates and the meal windows)."""
+    now = now or datetime.now(timezone.utc)
+    windows = models.MealWindows(**meal_windows())
+    common = dict(
+        meal=current_meal(now),
+        meal_windows=windows,
+        utc_offset_minutes=config.get_settings().event_utc_offset_minutes,
+        server_time=now,
+    )
+    try:
+        event_id, day = await resolve_current_event_day(now)
+    except LookupError:
+        async with db.SessionLocal() as session:
+            event_id = await session.scalar(
+                select(db.EventRow.id).order_by(db.EventRow.id).limit(1)
+            )
+        return models.ScanContext(event_id=event_id, event_dates_set=False, **common)
+    async with db.SessionLocal() as session:
+        event = await session.get(db.EventRow, event_id)
+    first, last = _local_date(event.starts_at), _local_date(event.ends_at)
+    dates = [first + timedelta(days=i) for i in range((last - first).days + 1)]
+    return models.ScanContext(
+        event_id=event_id, event_dates_set=True, day=day, event_dates=dates, **common
+    )
+
+
+async def meals_collected(event_id: int, day: int, delegate_id: str) -> list[str]:
+    """The meals this delegate has already collected on this day, in serving order."""
+    async with db.SessionLocal() as session:
+        got = set(
+            await session.scalars(
+                select(db.MealScanRow.meal).where(
+                    db.MealScanRow.event_id == event_id,
+                    db.MealScanRow.day == day,
+                    db.MealScanRow.delegate_id == delegate_id,
+                )
+            )
+        )
+    return [meal for meal in db.MEALS if meal in got]
+
+
+def _email_hint(email: str) -> str:
+    """Enough of an email to tell two people with the same name apart: ab***@gmail.com."""
+    local, _, domain = email.partition("@")
+    return f"{local[:2]}***@{domain}"
+
+
+async def search_mm_delegates(query: str, limit: int = 20) -> list[models.DelegateMatch]:
+    """Mumbai MUN delegates whose name or email contains the query, for hospitality to
+    serve someone who cannot show their QR (no phone, flat battery)."""
+    words = query.split()
+    async with db.SessionLocal() as session:
+        stmt = (
+            select(db.DelegateRow, db.MMDelegateRow)
+            .join(db.MMDelegateRow, db.MMDelegateRow.delegate_id == db.DelegateRow.id)
+            .order_by(db.DelegateRow.firstname, db.DelegateRow.lastname)
+            .limit(limit)
+        )
+        # Every word must match somewhere, so "rahul sh" finds Rahul Sharma.
+        for word in words:
+            escaped = word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            stmt = stmt.where(
+                or_(
+                    db.DelegateRow.firstname.ilike(pattern),
+                    db.DelegateRow.lastname.ilike(pattern),
+                    db.DelegateRow.email.ilike(pattern),
+                )
+            )
+        rows = (await session.execute(stmt)).all()
+    return [
+        models.DelegateMatch(
+            delegate_id=delegate.id,
+            name=f"{delegate.firstname} {delegate.lastname}",
+            email_hint=_email_hint(delegate.email),
+            committee=mm.committee,
+            country=mm.country,
+            food_preference=mm.food_preference,
+        )
+        for delegate, mm in rows
+    ]
 
 
 async def record_meal_scan(

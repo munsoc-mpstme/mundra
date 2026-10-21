@@ -82,6 +82,13 @@ ADMIN_EMAIL = "admin@munsocietympstme.com"
 ADMIN_PASSWORD = "admin-password-123"
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Each test starts with fresh rate limits. Every request comes from the same test
+    client address, so /login's 10/minute would otherwise trip across unrelated tests."""
+    app_module.limiter.reset()
+
+
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app_module.app) as c:

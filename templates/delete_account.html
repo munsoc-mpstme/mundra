@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delego | Delete your account</title>
+    <style>
+        :root {
+            --primary-color: #0F428F;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100svh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #2c3e50;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            padding: 2.5rem;
+            background-color: #fff;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            line-height: 1.6;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-size: 1.8rem;
+            text-align: center;
+            margin: 0 0 1.5rem 0;
+        }
+
+        h2 {
+            color: var(--primary-color);
+            font-size: 1.15rem;
+            margin: 1.75rem 0 0.5rem 0;
+        }
+
+        a {
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+
+        ol,
+        ul {
+            padding-left: 1.25rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Delete your Delego account</h1>
+        <p>Delego is the MUNSociety MPSTME app for Mumbai MUN. You can delete your account and the data
+            stored with it at any time, in the app or by email.</p>
+
+        <h2>In the app</h2>
+        <ol>
+            <li>Open Delego and log in.</li>
+            <li>Go to your profile.</li>
+            <li>Tap <strong>Delete account</strong> and confirm.</li>
+        </ol>
+        <p>Your account is deleted straight away.</p>
+
+        <h2>By email</h2>
+        <p>If you can no longer log in, email <a href="mailto:{{ support_email }}?subject=Delete%20my%20Delego%20account">{{ support_email }}</a>
+            from the address you registered with, with the subject "Delete my Delego account". We will delete it
+            and reply to confirm.</p>
+
+        <h2>What is deleted</h2>
+        <ul>
+            <li>Your login and password</li>
+            <li>Your profile: name, email, backup email, phone number, date of birth and gender</li>
+            <li>Your Mumbai MUN details: committee, country, diet and food notes</li>
+            <li>Your past MUN experience</li>
+            <li>Your meal-collection history and your food badge QR code</li>
+            <li>Any OC team memberships</li>
+        </ul>
+        <p>Messages sent in a committee's break-coordination chat (used by organising committee members only)
+            are kept so the conversation stays readable for the other people in it.</p>
+    </div>
+</body>
+
+</html>

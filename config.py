@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # of team access are worked out in this local time, not in UTC. A fixed offset is
     # enough because India has no daylight saving.
     event_utc_offset_minutes: int = 330
+    # When each meal starts, in conference-local time (HH:MM). A scan with no meal given
+    # is filed under the meal whose window it falls in: breakfast until lunch starts,
+    # lunch until high tea starts, high tea for the rest of the day.
+    meal_lunch_from: str = "11:00"
+    meal_hitea_from: str = "15:30"
     tech_email: str = "technology@munsocietympstme.com"
     support_email: str = "contact@munsocietympstme.com"
     # Public base URL of this API. Used for password-reset links and the logo in emails,

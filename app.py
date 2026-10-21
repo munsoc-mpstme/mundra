@@ -18,11 +18,12 @@ from fastapi import (
     FastAPI,
     Form,
     HTTPException,
+    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -871,6 +872,39 @@ async def get_my_mm_delegate(user: models.AuthUser = Depends(get_current_user)):
     return mm
 
 
+@app.get(
+    "/mumbaimun/badge",
+    tags=["Food"],
+    response_model=models.Badge,
+    responses={404: {"model": models.ErrorResponse}},
+)
+async def get_my_badge(user: models.AuthUser = Depends(get_current_user)):
+    """The caller's food badge: the string to show as a QR, which carries their id and
+    diet so a scanner can show the diet even offline. Re-fetch it after the diet changes."""
+    mm = await database.get_mm_delegate_by_id(user.id)
+    if not mm:
+        raise HTTPException(status_code=404, detail="Not registered for Mumbai MUN")
+    return models.Badge(
+        qr=utils.badge_payload(mm.id, mm.food_preference),
+        delegate_id=mm.id,
+        name=f"{mm.firstname} {mm.lastname}",
+        food_preference=mm.food_preference,
+    )
+
+
+@app.get(
+    "/mumbaimun/badge/qr",
+    tags=["Food"],
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}, 404: {"model": models.ErrorResponse}},
+)
+async def get_my_badge_qr(user: models.AuthUser = Depends(get_current_user)):
+    """The caller's food badge as a PNG QR code (the same string as /mumbaimun/badge)."""
+    badge = await get_my_badge(user)
+    png = await asyncio.to_thread(utils.qr_png, badge.qr)
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @app.patch(
     "/mumbaimun/delegates/{id}/food_preference",
     tags=["Food"],
@@ -909,19 +943,23 @@ async def set_food_preference(
 )
 async def scan_meal(
     delegate_id: Annotated[str, Form()],
-    meal: Annotated[str, Form()],
+    meal: Annotated[str, Form()] = "",
     diet: Annotated[str, Form()] = "",
     scanned_at: Annotated[str, Form()] = "",  # when the phone scanned it (see _parse_scanned_at)
     user: models.AuthUser = Depends(require_food_scan),
 ):
-    """Record a delegate collecting a meal. The day is derived from the date of the scan
-    against the event, so the operator only picks the meal (breakfast, lunch or high_tea)
-    and, optionally, the diet served. Returns `served`, or `duplicate` (with a 200) when
-    they already collected this meal, which is logged to the flagged list."""
-    meal = _parse_meal(meal)
+    """Record a delegate collecting a meal. `delegate_id` is what the QR holds: a badge
+    code (DELEGO1:...) or a plain id. The day comes from the date of the scan and, when
+    `meal` is left blank, the meal from its time (see GET /food/context), so the operator
+    picks neither. `diet` optionally records what was actually served. Returns `served`,
+    or `duplicate` (with a 200) when they already collected this meal, which is logged to
+    the flagged list."""
+    delegate_id, _ = utils.parse_badge(delegate_id)
+    scanned = _parse_scanned_at(scanned_at)
+    meal = _parse_meal(meal) if meal.strip() else database.current_meal(scanned)
     diet = _parse_diet(diet)
     try:
-        event_id, day = await database.resolve_scan_day(now=_parse_scanned_at(scanned_at))
+        event_id, day = await database.resolve_scan_day(now=scanned)
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     try:
@@ -935,6 +973,73 @@ async def scan_meal(
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get(
+    "/food/context",
+    tags=["Food"],
+    response_model=models.ScanContext,
+    responses={403: {"model": models.ErrorResponse}},
+)
+async def scan_context(user: models.AuthUser = Depends(require_food_scan)):
+    """Today's event day and the meal being served now, so the scanner shows them instead
+    of asking. Also returns the event's dates and the meal windows: cache them, and the
+    scanner can work out the day and meal itself while offline."""
+    return await database.scan_context()
+
+
+@app.get(
+    "/food/lookup",
+    tags=["Food"],
+    response_model=models.BadgeLookup,
+    responses={
+        400: {"model": models.ErrorResponse},
+        403: {"model": models.ErrorResponse},
+        404: {"model": models.ErrorResponse},
+    },
+)
+async def lookup_badge(
+    code: str, meal: str = "", user: models.AuthUser = Depends(require_food_scan)
+):
+    """Who a scanned badge (or delegate id) belongs to, their registered diet and
+    allergy notes, and whether they already had the current meal today. Records nothing:
+    serve the plate with POST /food/scans."""
+    delegate_id, _ = utils.parse_badge(code)
+    mm = await database.get_mm_delegate_by_id(delegate_id)
+    if not mm:
+        raise HTTPException(status_code=404, detail="Not a Mumbai MUN delegate")
+    meal = _parse_meal(meal) if meal.strip() else database.current_meal()
+    try:
+        event_id, day = await database.resolve_scan_day()
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    collected = await database.meals_collected(event_id, day, delegate_id)
+    return models.BadgeLookup(
+        delegate_id=mm.id,
+        name=f"{mm.firstname} {mm.lastname}",
+        food_preference=mm.food_preference,
+        food_notes=mm.food_notes,
+        committee=mm.committee,
+        day=day,
+        meal=meal,
+        collected_today=collected,
+        already_collected=meal in collected,
+    )
+
+
+@app.get(
+    "/food/delegates",
+    tags=["Food"],
+    response_model=list[models.DelegateMatch],
+    responses={403: {"model": models.ErrorResponse}, 422: {"model": models.ErrorResponse}},
+)
+async def search_delegates_for_food(
+    q: Annotated[str, Query(min_length=2, max_length=100)],
+    user: models.AuthUser = Depends(require_food_scan),
+):
+    """Find a Mumbai MUN delegate by name or email, for someone who cannot show their QR
+    (no phone, flat battery). Serve them with POST /food/scans using the delegate_id."""
+    return await database.search_mm_delegates(q.strip())
 
 
 @app.get(
@@ -1478,7 +1583,12 @@ async def delete_user(user: models.AuthUser = Depends(get_current_user)):
             detail="Admins must be demoted before they can delete their account",
         )
     try:
-        await database.delete_user(user.email)
+        delegate_id = await database.delete_account(user.email)
+        if delegate_id:
+            # The cached QR image is the last copy of their id on disk.
+            qr_image = os.path.join(utils.qr_folder, f"{delegate_id}.jpg")
+            if os.path.exists(qr_image):
+                os.remove(qr_image)
         return JSONResponse(
             status_code=200, content={"message": "Account deleted successfully"}
         )
@@ -1507,6 +1617,15 @@ async def serve_reset_html(request: Request, token: str):
             request, "reset.html", {"invalid": True}, status_code=e.status_code
         )
     return templates.TemplateResponse(request, "reset.html", {"invalid": False})
+
+
+@app.get("/delete-account", tags=["Auth"], response_class=HTMLResponse)
+async def delete_account_page(request: Request):
+    """Public page explaining how to delete a Delego account and its data. Google Play's
+    data safety form needs this as a web link, alongside the in-app option."""
+    return templates.TemplateResponse(
+        request, "delete_account.html", {"support_email": settings.tech_email}
+    )
 
 
 @app.post(
