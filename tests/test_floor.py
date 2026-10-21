@@ -513,6 +513,10 @@ def test_the_matrices_are_seeded(client):
     unsc = matrix("UNSC")
     assert len(unsc) == 20
     assert unsc[0] == {"name": "China", "code": "cn", "tag": None, "detail": None}
+    disec = matrix("DISEC")
+    assert len(disec) == 33
+    assert disec[0] == {"name": "United States of America", "code": "us", "tag": None, "detail": None}
+    assert disec[-1] == {"name": "Australia", "code": "au", "tag": None, "detail": None}
     for name in ("ECOSOC", "UNICEF", "UNODC", "WTO", "PSC"):
         assert len(matrix(name)) == 45, name
     psc = matrix("PSC")

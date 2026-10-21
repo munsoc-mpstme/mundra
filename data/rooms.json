@@ -46,5 +46,11 @@
     "committee_name": "IPC",
     "room_code": "TR 401",
     "floor": "Floor 4"
+  },
+  {
+    "id": "disec_9",
+    "committee_name": "DISEC",
+    "room_code": "TBA",
+    "floor": "TBA"
   }
 ]

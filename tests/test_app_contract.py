@@ -165,7 +165,7 @@ def test_flagged_scans_stay_team_or_head_only(client):
 
 # ---- break coordination, as committee_chat_page.dart uses it ---------------------------
 
-COMMITTEES = ["UNSC", "CCC", "PSC", "WTO", "UNODC", "UNICEF", "ECOSOC", "IPC"]
+COMMITTEES = ["UNSC", "CCC", "PSC", "WTO", "UNODC", "UNICEF", "ECOSOC", "IPC", "DISEC"]
 
 
 def test_committee_list_for_oc_and_admin_only(client):
@@ -174,7 +174,7 @@ def test_committee_list_for_oc_and_admin_only(client):
         assert res.status_code == 200
         names = [c["name"] for c in res.json()]
         # The migration seeds these in this order; other tests may add more after them.
-        assert names[:8] == COMMITTEES
+        assert names[:9] == COMMITTEES
         assert all({"id", "name"} <= set(c) for c in res.json())
     for role in ("delegate", "eb"):
         assert client.get("/committees", headers=auth_header(make(role=role))).status_code == 403
