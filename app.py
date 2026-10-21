@@ -1900,3 +1900,65 @@ async def committee_floor_ws(websocket: WebSocket, committee_id: int):
         pass
     finally:
         floor.hub.disconnect(committee_id, viewer)
+
+
+
+_PRIVACY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy · Delego (Mumbai MUN 2026)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif; background: #0f111a; color: #f1f3f9; margin: 0; padding: 32px 20px; line-height: 1.6; }
+    main { max-width: 720px; margin: 0 auto; background: #181b28; border-radius: 16px; padding: 28px; border: 1px solid #2b3048; }
+    h1 { color: #ff2bb4; margin-top: 0; font-size: 1.75rem; }
+    h2 { color: #ff2bb4; font-size: 1.15rem; margin-top: 24px; }
+    a { color: #d9ff1f; }
+    .meta { color: #9aa3bd; font-size: 0.9rem; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Delego — Mumbai MUN 2026 Privacy Policy</h1>
+    <div class="meta">Last updated: 20 October 2026 · MUN Society, MPSTME (NMIMS Mumbai)</div>
+
+    <h2>1. What We Collect &amp; Why</h2>
+    <p>When you create a Delego account for Mumbai MUN 2026, we collect:</p>
+    <ul>
+      <li><strong>Name and Email Address:</strong> to identify your account, send your 6-digit verification code and password reset emails, and match your conference registration.</li>
+      <li><strong>Contact Phone Number:</strong> to verify your delegate registration at the registration desk and reach you for urgent committee or conference logistics.</li>
+      <li><strong>Date of Birth (Optional):</strong> if provided, used only to verify delegate eligibility.</li>
+      <li><strong>Food Preference (Veg / Jain) &amp; Meal Scans:</strong> to prepare catering counts and issue your QR meal badge at conference meals (breakfast, lunch, and high tea).</li>
+      <li><strong>Camera Access (Staff Only):</strong> used solely by Organizing Committee staff to scan delegate QR badges. Camera video is never recorded or uploaded.</li>
+    </ul>
+
+    <h2>2. How Your Data Is Processed &amp; Stored</h2>
+    <p>Your account profile and meal scan records are transmitted over HTTPS and stored in our cloud backend hosted on Render and Supabase (PostgreSQL). Transactional verification and password-reset emails are delivered through Brevo. We do not sell, rent, or share your personal data with advertisers, and the app does not track you across other apps or websites.</p>
+
+    <h2>3. Minors &amp; Student Delegates</h2>
+    <p>Mumbai MUN is an academic Model United Nations conference open to high-school and university delegates (aged 13 and above). Personal data of student delegates is collected strictly for event administration, committee participation, and on-campus meal service. Delegates or their parents/guardians may delete their account or request data removal at any time.</p>
+
+    <h2>4. Data Retention</h2>
+    <p>We retain delegate account and meal scan data only for the duration of Mumbai MUN 2026 (30 October – 1 November 2026) and post-conference reconciliation (up to 60 days after the conference concludes), after which conference delegate records are permanently deleted.</p>
+
+    <h2 id="delete-account">5. Account &amp; Data Deletion</h2>
+    <p>You can permanently delete your account and associated personal data at any time:</p>
+    <ul>
+      <li><strong>Inside the Delego App:</strong> Open <em>Settings</em> from the side menu and tap <strong>Delete Account</strong> at the bottom of the screen. Your account and profile data are deleted immediately.</li>
+      <li><strong>On the Web / By Email:</strong> Visit <a href="/delete-account">/delete-account</a> or email <a href="mailto:secretariat.mumbaimun@gmail.com?subject=Delete%20Delego%20Account">secretariat.mumbaimun@gmail.com</a> from your registered email address with the subject <code>Delete Delego Account</code>, and we will erase your account and associated records within 48 hours.</li>
+    </ul>
+
+    <h2>6. Contact Us</h2>
+    <p>MUN Society, MPSTME, SVKM's NMIMS, Vile Parle (West), Mumbai 400056.<br/>
+    Email: <a href="mailto:secretariat.mumbaimun@gmail.com">secretariat.mumbaimun@gmail.com</a><br/>
+    Phone: +91 95600 46431</p>
+  </main>
+</body>
+</html>
+"""
+
+
+@app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+async def privacy_policy_page():
+    return HTMLResponse(content=_PRIVACY_HTML)
