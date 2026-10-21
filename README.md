@@ -342,8 +342,8 @@ replays its exact requests. They sit on top of the OC model above without replac
   `reject`: a member of a team with unscoped `chat.post`). Admins and heads can do both.
   Anyone else gets 403, including when the same action is sent as a plain `status`
   message or over the WebSocket. Messages carry the aliases `sender`
-  (the sender's email) and `type`, next to the upstream fields. The eight committees
-  (UNSC, CCC, PSC, WTO, UNODC, UNICEF, ECOSOC, IPC) are seeded into the first event.
+  (the sender's email) and `type`, next to the upstream fields. The nine committees
+  (UNSC, CCC, PSC, WTO, UNODC, UNICEF, ECOSOC, IPC, DISEC) are seeded into the first event.
 - **Roles.** `eb` (executive board) is a fourth role, assignable with
   `PATCH /admin/users/{email}/role`.
 
