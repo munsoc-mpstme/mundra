@@ -6,11 +6,20 @@
 <title>Speakers' List · Mumbai MUN'26</title>
 <!--
   The committee smartboard. Follows one committee's floor live (WS /ws/committees/{id}/floor):
-  the list the EB has on screen (GSL or moderated caucus) and the timer, bottom right.
+  the list the EB has on screen (GSL or moderated caucus) and the timer, top right.
   Open with ?committee=<id> to skip the picker; the choice is also remembered. Press C (or
   click the committee name) to switch. Public and read-only: the EB changes it from the app.
 -->
 <style>
+  /* Inter, the Delego app's font, served from here so every board shows the same type. */
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("/static/fonts/Inter-Regular.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("/static/fonts/Inter-Bold.woff2") format("woff2");
+  }
   :root {
     --bg: #000000;
     --card: #141214;
@@ -27,6 +36,8 @@
     --green-accent: #27FFFF;
     --surface: var(--pink);
     --accent: var(--pink-accent);
+    --side-w: min(460px, 40vw); /* the timer column, and the capsule above it */
+    --radius: 24px; /* every box: timer, capsule, cards, pills (not flags or badges) */
   }
   body.view-mod { --surface: var(--blue); --accent: var(--blue-accent); }
   body.view-unmod { --surface: var(--green); --accent: var(--green-accent); }
@@ -34,7 +45,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body {
-    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
     background: var(--bg);
     color: var(--ink);
     display: flex;
@@ -44,88 +55,125 @@
     overflow: hidden;
   }
 
-  /* --- header --- */
-  header { display: flex; align-items: center; gap: 24px; }
-  .wordmark { font-size: 22px; letter-spacing: 1px; white-space: nowrap; }
+  /* --- header: 10% of the screen's height. Wordmark and committee (left, the same size),
+     the logo (centre, the full height) and the view capsule (right: as wide as the timer
+     below it, as tall as the text on the left). The equal side columns keep the logo in
+     the exact centre. --- */
+  header {
+    --header-h: 10vh;
+    flex: none; height: var(--header-h);
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px;
+  }
+  .brand {
+    display: flex; align-items: baseline; gap: .6em; min-width: 0; overflow: hidden;
+    /* Smaller only on narrow (4:3) boards, so a committee name like UNICEF still fits. */
+    font-size: min(calc(var(--header-h) * .44), 2.6vw);
+  }
+  .wordmark { flex: none; font-size: 1em; letter-spacing: .04em; white-space: nowrap; }
   .wordmark b { font-weight: 700; }
   .committee {
-    font-size: 40px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+    min-width: 0; font-size: 1em; font-weight: 400; letter-spacing: .03em; cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  .logo { display: block; height: var(--header-h); width: auto; }
   .view-label {
-    margin-left: auto; padding: 8px 18px; border-radius: 999px;
-    background: var(--surface); font-size: 20px; font-weight: 700; white-space: nowrap;
+    justify-self: end; width: var(--side-w); max-width: 100%;
+    height: calc(var(--header-h) * .53); line-height: calc(var(--header-h) * .53);
+    padding: 0 .8em; border-radius: var(--radius); text-align: center;
+    background: var(--surface); font-weight: 700;
+    /* "General Speakers' List" fits the timer's width at any screen size. */
+    font-size: min(calc(var(--header-h) * .3), 30px, 2.6vw);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
+  /* --- below the header: the speakers (left) and the timer column (top right). Separate
+     columns, so a card can never sit under the clock. --- */
+  #stage { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 40px; position: relative; }
+
   /* --- speakers --- */
-  main { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+  main { flex: 1; min-width: 0; align-self: stretch; overflow: hidden; position: relative; }
+  /* Always two columns of large cards with a wide gap between them. A list that doesn't
+     fit steps down once (dense; denser only where a column is too narrow for dense), and a
+     longer list shows its top speakers, the ones about to speak (the count is bottom
+     left). */
   #grid {
-    display: grid; gap: 12px 16px; align-content: start;
-    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    display: grid; gap: 14px 40px; align-content: start;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .speaker {
-    display: flex; align-items: center; gap: 14px;
-    background: var(--card); border: 1px solid var(--card-line); border-radius: 16px;
-    padding: 12px 16px; min-width: 0;
+    display: flex; align-items: center; gap: 18px;
+    background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius);
+    padding: 16px 24px; min-width: 0;
   }
   .speaker .num {
-    flex: none; width: 40px; text-align: right;
-    font-size: 24px; font-weight: 700; color: var(--muted);
+    flex: none; width: 44px; text-align: right;
+    font-size: 28px; font-weight: 700; color: var(--ink);
     font-variant-numeric: tabular-nums;
   }
   .speaker .name {
-    font-size: 26px; font-weight: 700; min-width: 0; line-height: 1.15;
+    font-size: 32px; font-weight: 700; min-width: 0; line-height: 1.15;
     overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
     overflow-wrap: anywhere;
   }
   .speaker.current { background: var(--surface); border-color: transparent; }
   .speaker.current .num { color: var(--accent); }
-  #grid.dense { grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px 12px; }
-  #grid.dense .speaker { padding: 8px 12px; border-radius: 12px; }
-  #grid.dense .name { font-size: 20px; }
-  #grid.dense .num { font-size: 18px; width: 30px; }
-  #grid.denser { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 6px 10px; }
-  #grid.denser .speaker { padding: 5px 10px; }
-  #grid.denser .name { font-size: 16px; }
-  #grid.denser .num { font-size: 14px; width: 26px; }
+  #grid.dense { gap: 10px 40px; }
+  #grid.dense .speaker { padding: 10px 20px; gap: 14px; }
+  #grid.dense .name { font-size: 24px; }
+  #grid.dense .num { font-size: 21px; width: 34px; }
+  #grid.denser { gap: 6px 32px; }
+  #grid.denser .speaker { padding: 5px 16px; gap: 12px; }
+  #grid.denser .name { font-size: 18px; }
+  #grid.denser .num { font-size: 15px; width: 26px; }
 
   .flag {
-    flex: none; width: 48px; height: 36px; border-radius: 4px; object-fit: cover;
+    flex: none; width: 64px; height: 48px; border-radius: 4px; object-fit: cover;
     background: #2a2629;
   }
-  #grid.dense .flag { width: 36px; height: 27px; }
-  #grid.denser .flag { width: 28px; height: 21px; }
+  #grid.dense .flag { width: 48px; height: 36px; }
+  #grid.denser .flag { width: 32px; height: 24px; }
   .person {
-    flex: none; width: 48px; height: 36px; display: grid; place-items: center;
+    flex: none; width: 64px; height: 48px; display: grid; place-items: center;
     border-radius: 4px; background: #2a2629;
   }
   /* A party abbreviation (PSC) in place of a flag: neutral; as tall as a flag and as wide
      as the abbreviation needs, so "SS(UBT)" stays as legible as "BJP". */
   .tag {
-    flex: none; min-width: 48px; height: 36px; padding: 0 6px; box-sizing: border-box;
+    flex: none; min-width: 64px; height: 48px; padding: 0 8px; box-sizing: border-box;
     display: flex; align-items: center; justify-content: center;
     border-radius: 4px; background: #FFFFFF; color: #000000;
-    font-size: 15px; font-weight: 700; white-space: nowrap;
+    font-size: 19px; font-weight: 700; white-space: nowrap;
   }
-  #grid.dense .tag { min-width: 36px; height: 27px; padding: 0 4px; font-size: 12px; }
-  #grid.denser .tag { min-width: 28px; height: 21px; padding: 0 3px; font-size: 10px; }
-  #timer .who .tag { min-width: 40px; height: 30px; font-size: 14px; }
-  .person svg { width: 26px; height: 26px; fill: var(--ink); opacity: .85; }
-  #grid.dense .person { width: 36px; height: 27px; }
-  #grid.denser .person { width: 28px; height: 21px; }
+  #grid.dense .tag { min-width: 48px; height: 36px; padding: 0 6px; font-size: 15px; }
+  #grid.denser .tag { min-width: 32px; height: 24px; padding: 0 4px; font-size: 11px; }
+  #timer .who .tag { min-width: 40px; height: 30px; padding: 0 6px; font-size: 14px; }
+  .person svg { width: 32px; height: 32px; fill: var(--ink); opacity: .85; }
+  #grid.dense .person { width: 48px; height: 36px; }
+  #grid.dense .person svg { width: 26px; height: 26px; }
+  #grid.denser .person { width: 32px; height: 24px; }
+  #grid.denser .person svg { width: 18px; height: 18px; }
+  #timer .who .person svg { width: 22px; height: 22px; }
 
-  .empty { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-content: center; text-align: center; gap: 8px; }
+  /* Centred on the screen, with room as wide as the timer column kept free on both sides
+     so it never runs under the timer. On a narrow board there isn't room for that: it
+     centres in the speakers' column instead. */
+  .empty {
+    position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+    padding: 0 calc(var(--side-w) + 40px);
+    display: grid; place-content: center; text-align: center; gap: 8px;
+  }
+  @media (max-width: 1299px) { .empty { padding-left: 0; } }
   .empty h2 { font-size: 36px; }
   .empty p { color: var(--muted); font-size: 20px; }
 
-  /* --- bottom bar: status (left) and timer (right) --- */
-  footer { display: flex; align-items: flex-end; gap: 24px; }
+  /* --- the timer column, top right --- */
+  #side { flex: none; width: var(--side-w); display: flex; flex-direction: column; gap: 14px; }
   #timer {
-    width: 460px; max-width: 100%; border-radius: 24px; padding: 18px 24px;
+    width: 100%; border-radius: var(--radius); padding: 18px 24px;
     background: var(--surface);
   }
   #timer .who { display: flex; align-items: center; gap: 12px; min-height: 36px; }
-  #timer .who .label { font-size: 14px; letter-spacing: 2px; font-weight: 700; color: var(--accent); }
+  #timer .who .label { flex: none; font-size: 20px; letter-spacing: 2px; font-weight: 700; color: var(--accent); white-space: nowrap; }
   #timer .who .name { font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #timer .who .flag, #timer .who .person { width: 40px; height: 30px; }
   #clock {
@@ -139,15 +187,19 @@
   #state { font-size: 16px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; min-height: 20px; }
 
   body.view-unmod main { display: none; }
-  body.view-unmod footer { flex: 1; align-items: center; justify-content: center; flex-direction: column; }
+  body.view-unmod #side {
+    flex: 1; width: auto; max-width: none; align-self: stretch;
+    align-items: center; justify-content: center;
+  }
   body.view-unmod #timer { width: min(900px, 90vw); padding: 40px 48px; text-align: center; }
-  body.view-unmod #clock { font-size: min(30vw, 300px); }
+  body.view-unmod #clock { font-size: min(24vw, 250px); } /* Inter's digits are wide: fits the box */
   body.view-unmod #timer .who { justify-content: center; }
 
-  .status { order: -1; margin-right: auto; text-align: left; color: var(--muted); font-size: 16px; line-height: 1.6; }
-  .pill { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--card-line); }
+  /* --- bottom left: list size and connection --- */
+  footer { flex: none; }
+  .status { text-align: left; color: var(--muted); font-size: 16px; line-height: 1.6; }
+  .pill { display: inline-block; padding: 4px 12px; border-radius: var(--radius); border: 1px solid var(--card-line); }
   .pill.off { color: var(--danger); border-color: var(--danger); }
-  body.view-unmod .status { position: fixed; left: 28px; bottom: 20px; }
 
   /* --- committee picker --- */
   #picker {
@@ -159,7 +211,7 @@
   #picker .choices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 900px; }
   #picker button {
     font: inherit; font-size: 22px; font-weight: 700; color: var(--ink); cursor: pointer;
-    background: var(--card); border: 1px solid var(--card-line); border-radius: 16px; padding: 14px 24px;
+    background: var(--card); border: 1px solid var(--card-line); border-radius: var(--radius); padding: 14px 24px;
   }
   #picker button:hover, #picker button:focus { background: var(--pink); outline: none; }
   #picker p { color: var(--muted); }
@@ -167,26 +219,34 @@
 </head>
 <body>
   <header>
-    <div class="wordmark">MUMBAI <b>MUN&rsquo;26</b></div>
-    <div class="committee" id="committee" title="Change committee (C)">&nbsp;</div>
+    <div class="brand">
+      <div class="wordmark">MUMBAI <b>MUN&rsquo;26</b></div>
+      <div class="committee" id="committee" title="Change committee (C)"></div>
+    </div>
+    <img class="logo" src="/static/logo_header.png" alt="">
     <div class="view-label" id="view-label">General Speakers&rsquo; List</div>
   </header>
 
-  <main>
-    <div id="grid"></div>
+  <div id="stage">
+    <main>
+      <div id="grid"></div>
+    </main>
     <div class="empty" id="empty">
       <h2>No speakers yet</h2>
       <p>The EB adds speakers from EB Tools in the Delego app.</p>
     </div>
-  </main>
+
+    <aside id="side">
+      <section id="timer">
+        <div class="who" id="who"></div>
+        <div id="clock" class="idle">00:00</div>
+        <div class="bar"><i id="bar"></i></div>
+        <div id="state"></div>
+      </section>
+    </aside>
+  </div>
 
   <footer>
-    <section id="timer">
-      <div class="who" id="who"></div>
-      <div id="clock" class="idle">00:00</div>
-      <div class="bar"><i id="bar"></i></div>
-      <div id="state"></div>
-    </section>
     <div class="status">
       <div id="count">0 speakers</div>
       <span class="pill off" id="conn">Connecting…</span>
@@ -462,13 +522,29 @@
     return s;
   }
 
-  // Shrink the cards when the list doesn't fit the screen.
+  // Card size, in two columns: large if the list fits, else one size down. A size is skipped
+  // when a column would be too narrow for it (names would break mid-word), which is the
+  // only way to reach the smallest. A list longer than the screen shows its top speakers,
+  // and a card that would be cut by the bottom edge is hidden rather than sliced.
+  const FIT_STEPS = [
+    { cls: "", minCol: 380 },
+    { cls: "dense", minCol: 300 },
+    { cls: "denser", minCol: 0 },
+  ];
   function fit() {
     const grid = $("grid");
     const main = grid.parentElement;
-    grid.classList.remove("dense", "denser");
-    if (main.scrollHeight > main.clientHeight) grid.classList.add("dense");
-    if (main.scrollHeight > main.clientHeight) grid.classList.add("denser");
+    for (let i = 0; i < FIT_STEPS.length; i++) {
+      const step = FIT_STEPS[i];
+      if (main.clientWidth / 2 < step.minCol) continue;
+      grid.className = step.cls;
+      if (i > 0 || main.scrollHeight <= main.clientHeight) break;
+    }
+    const bottom = main.getBoundingClientRect().bottom + 1;
+    const cards = grid.children;
+    for (let i = 0; i < cards.length; i++) {
+      cards[i].style.visibility = cards[i].getBoundingClientRect().bottom > bottom ? "hidden" : "";
+    }
   }
 
   // ---------- the clock ----------
@@ -518,6 +594,8 @@
     if (document.visibilityState === "visible") keepAwake();
   });
   window.addEventListener("resize", fit);
+  // Inter arrives after the first render and is wider than the fallback: measure again.
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
 
   keepAwake();
   render();
