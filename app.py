@@ -1736,6 +1736,75 @@ def get_schedule():
     return schedule_data
 
 
+# The app's update prompt. Each platform has `latest` (x.y.z; an older app is asked, once,
+# to update, and can say "Not now") and the store link the prompt opens. There is no
+# forced update: a blocked app would lose its offline QR badge and scanner at the venue.
+# Edit data/app_config.json and redeploy to announce a release.
+APP_CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "app_config.json")
+APP_PLATFORMS = ("ios", "android")
+DEFAULT_UPDATE_MESSAGE = "A new version of Delego is available."
+
+
+def _is_app_version(value) -> bool:
+    """Whether `value` is `x.y.z` (three plain numbers)."""
+    if not isinstance(value, str):
+        return False
+    parts = value.split(".")
+    return len(parts) == 3 and all(p.isascii() and p.isdigit() for p in parts)
+
+
+def parse_app_config(data) -> dict:
+    """The valid part of the config. A platform with a bad version or a store link that
+    isn't https is left out (so that platform gets no prompt). Other keys, such as an old
+    `min`, are ignored."""
+    log = logging.getLogger("uvicorn.error")
+    if not isinstance(data, dict):
+        log.warning("data/app_config.json is not an object; no update prompt is served")
+        return {}
+    message = data.get("message")
+    out = {"message": message if isinstance(message, str) and message.strip() else DEFAULT_UPDATE_MESSAGE}
+    for platform in APP_PLATFORMS:
+        entry = data.get(platform)
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            log.warning("data/app_config.json: %s is not an object; ignored", platform)
+            continue
+        store_url = entry.get("store_url", "")
+        if not _is_app_version(entry.get("latest")):
+            log.warning("data/app_config.json: %s needs latest as x.y.z; ignored", platform)
+            continue
+        if not isinstance(store_url, str) or (store_url and not store_url.startswith("https://")):
+            log.warning("data/app_config.json: %s store_url must be empty or https; ignored", platform)
+            continue
+        out[platform] = {"latest": entry["latest"], "store_url": store_url}
+    return out
+
+
+@lru_cache
+def read_app_config() -> dict:
+    """Reads data/app_config.json. A missing or broken file gives {} (no prompt), so a bad
+    edit can never stop the app from opening."""
+    try:
+        with open(APP_CONFIG_FILE_PATH, "r") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logging.getLogger("uvicorn.error").exception(
+            "data/app_config.json could not be read; no update prompt is served"
+        )
+        return {}
+    return parse_app_config(data)
+
+
+@app.get("/public/app_config", tags=["Dynamic Data"])
+def get_app_config():
+    """What the app needs to decide whether to ask for an update. Public: the app reads it
+    before anyone logs in."""
+    return read_app_config()
+
+
 ####################
 
 # Committee floor (EB Tools): the GSL and moderated caucus speakers' lists and the timer,

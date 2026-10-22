@@ -1,0 +1,11 @@
+{
+  "message": "A new version of Delego is available.",
+  "ios": {
+    "latest": "3.0.3",
+    "store_url": ""
+  },
+  "android": {
+    "latest": "3.0.3",
+    "store_url": ""
+  }
+}
