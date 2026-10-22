@@ -1619,12 +1619,17 @@ async def serve_reset_html(request: Request, token: str):
     return templates.TemplateResponse(request, "reset.html", {"invalid": False})
 
 
+# The address the privacy policy gives for deletion requests and questions. Keep it the
+# same as the one in _PRIVACY_HTML and the app's PrivacyPolicyPage.
+PRIVACY_CONTACT_EMAIL = "secretariat.mumbaimun@gmail.com"
+
+
 @app.get("/delete-account", tags=["Auth"], response_class=HTMLResponse)
 async def delete_account_page(request: Request):
     """Public page explaining how to delete a Delego account and its data. Google Play's
     data safety form needs this as a web link, alongside the in-app option."""
     return templates.TemplateResponse(
-        request, "delete_account.html", {"support_email": settings.tech_email}
+        request, "delete_account.html", {"support_email": PRIVACY_CONTACT_EMAIL}
     )
 
 
@@ -1921,7 +1926,7 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 <body>
   <main>
     <h1>Delego — Mumbai MUN 2026 Privacy Policy</h1>
-    <div class="meta">Last updated: 20 October 2026 · MUN Society, MPSTME (NMIMS Mumbai)</div>
+    <div class="meta">Last updated: 22 October 2026 · MUN Society, MPSTME (NMIMS Mumbai)</div>
 
     <h2>1. What We Collect &amp; Why</h2>
     <p>When you create a Delego account for Mumbai MUN 2026, we collect:</p>
@@ -1930,26 +1935,36 @@ _PRIVACY_HTML = """<!DOCTYPE html>
       <li><strong>Contact Phone Number:</strong> to verify your delegate registration at the registration desk and reach you for urgent committee or conference logistics.</li>
       <li><strong>Date of Birth (Optional):</strong> if provided, used only to verify delegate eligibility.</li>
       <li><strong>Food Preference (Veg / Jain) &amp; Meal Scans:</strong> to prepare catering counts and issue your QR meal badge at conference meals (breakfast, lunch, and high tea).</li>
+      <li><strong>Allergy &amp; Food Notes:</strong> any allergies or dietary notes recorded with your registration, so the catering team can serve you safely.</li>
       <li><strong>Camera Access (Staff Only):</strong> used solely by Organizing Committee staff to scan delegate QR badges. Camera video is never recorded or uploaded.</li>
     </ul>
 
     <h2>2. How Your Data Is Processed &amp; Stored</h2>
     <p>Your account profile and meal scan records are transmitted over HTTPS and stored in our cloud backend hosted on Render and Supabase (PostgreSQL). Transactional verification and password-reset emails are delivered through Brevo. We do not sell, rent, or share your personal data with advertisers, and the app does not track you across other apps or websites.</p>
 
-    <h2>3. Minors &amp; Student Delegates</h2>
+    <h2>3. Who Can See Your Data</h2>
+    <p>Only Mumbai MUN 2026 Organising Committee (OC) staff who need it for their role can see your details:</p>
+    <ul>
+      <li><strong>Hospitality and meal staff</strong> see your name, committee, diet, any allergy or food notes, and the meals you have collected that day when they scan your badge or look you up at a meal. When they search for a delegate by name or email, the email is shown partly hidden.</li>
+      <li><strong>Conference organisers and administrators</strong> can see delegate names and committees, and administrators can see your account details to manage registrations and roles.</li>
+    </ul>
+    <p>Other delegates cannot see your personal details.</p>
+
+    <h2>4. Minors &amp; Student Delegates</h2>
     <p>Mumbai MUN is an academic Model United Nations conference open to high-school and university delegates (aged 13 and above). Personal data of student delegates is collected strictly for event administration, committee participation, and on-campus meal service. Delegates or their parents/guardians may delete their account or request data removal at any time.</p>
 
-    <h2>4. Data Retention</h2>
+    <h2>5. Data Retention</h2>
     <p>We retain delegate account and meal scan data only for the duration of Mumbai MUN 2026 (30 October – 1 November 2026) and post-conference reconciliation (up to 60 days after the conference concludes), after which conference delegate records are permanently deleted.</p>
 
-    <h2 id="delete-account">5. Account &amp; Data Deletion</h2>
+    <h2 id="delete-account">6. Account &amp; Data Deletion</h2>
     <p>You can permanently delete your account and associated personal data at any time:</p>
     <ul>
       <li><strong>Inside the Delego App:</strong> Open <em>Settings</em> from the side menu and tap <strong>Delete Account</strong> at the bottom of the screen. Your account and profile data are deleted immediately.</li>
       <li><strong>On the Web / By Email:</strong> Visit <a href="/delete-account">/delete-account</a> or email <a href="mailto:secretariat.mumbaimun@gmail.com?subject=Delete%20Delego%20Account">secretariat.mumbaimun@gmail.com</a> from your registered email address with the subject <code>Delete Delego Account</code>, and we will erase your account and associated records within 48 hours.</li>
     </ul>
+    <p>Deleting your account removes your login, profile, registration details (including diet and food notes), meal history, QR badge and any OC team memberships. Messages that OC staff sent in a committee's break-coordination chat are kept with the sender's email address, so the conversation stays readable for the other staff in it.</p>
 
-    <h2>6. Contact Us</h2>
+    <h2>7. Contact Us</h2>
     <p>MUN Society, MPSTME, SVKM's NMIMS, Vile Parle (West), Mumbai 400056.<br/>
     Email: <a href="mailto:secretariat.mumbaimun@gmail.com">secretariat.mumbaimun@gmail.com</a><br/>
     Phone: +91 95600 46431</p>
