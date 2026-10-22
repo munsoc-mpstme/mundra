@@ -49,8 +49,17 @@
   .wordmark { font-size: 22px; letter-spacing: 1px; white-space: nowrap; }
   .wordmark b { font-weight: 700; }
   .committee {
-    font-size: 40px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: inline-flex; align-items: center; gap: 14px;
+    font: inherit; font-size: 40px; font-weight: 700; letter-spacing: 1px;
+    color: var(--ink); cursor: pointer; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; padding: 6px 18px 8px; border: 2px solid #FFFFFF;
+    border-radius: 14px; background: var(--card); transition: background .15s, border-color .15s;
+  }
+  .committee::after {
+    content: "▾"; font-size: 25px; line-height: 1; color: var(--accent);
+  }
+  .committee:hover, .committee:focus-visible {
+    background: var(--surface); border-color: var(--accent); outline: none;
   }
   .view-label {
     margin-left: auto; padding: 8px 18px; border-radius: 999px;
@@ -122,9 +131,9 @@
   footer { display: flex; align-items: flex-end; gap: 24px; }
   #timer {
     width: 460px; max-width: 100%; border-radius: 24px; padding: 18px 24px;
-    background: var(--surface);
+    background: var(--surface); text-align: right;
   }
-  #timer .who { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+  #timer .who { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-height: 36px; }
   #timer .who .label { font-size: 14px; letter-spacing: 2px; font-weight: 700; color: var(--accent); }
   #timer .who .name { font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #timer .who .flag, #timer .who .person { width: 40px; height: 30px; }
@@ -151,24 +160,27 @@
 
   /* --- committee picker --- */
   #picker {
-    position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.92); display: none;
-    place-content: center; gap: 16px; text-align: center; z-index: 10;
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.94); display: none;
+    place-content: center; gap: 22px; text-align: center; z-index: 10; padding: 32px;
   }
   #picker.open { display: grid; }
-  #picker h2 { font-size: 32px; }
-  #picker .choices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 900px; }
+  #picker h2 { font-size: 40px; }
+  #picker .choices { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; max-width: 1100px; }
   #picker button {
     font: inherit; font-size: 22px; font-weight: 700; color: var(--ink); cursor: pointer;
-    background: var(--card); border: 1px solid var(--card-line); border-radius: 16px; padding: 14px 24px;
+    background: var(--card); border: 2px solid #514B50; border-radius: 14px; padding: 16px 28px;
+    min-width: 160px; transition: background .15s, border-color .15s, transform .15s;
   }
-  #picker button:hover, #picker button:focus { background: var(--pink); outline: none; }
-  #picker p { color: var(--muted); }
+  #picker button:hover, #picker button:focus-visible {
+    background: var(--pink); border-color: var(--pink-accent); outline: none; transform: translateY(-2px);
+  }
+  #picker p { color: #D7D0D4; font-size: 18px; }
 </style>
 </head>
 <body>
   <header>
     <div class="wordmark">MUMBAI <b>MUN&rsquo;26</b></div>
-    <div class="committee" id="committee" title="Change committee (C)">&nbsp;</div>
+    <button class="committee" id="committee" type="button" title="Change committee (C)" aria-label="Change committee">&nbsp;</button>
     <div class="view-label" id="view-label">General Speakers&rsquo; List</div>
   </header>
 
