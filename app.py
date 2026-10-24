@@ -1879,7 +1879,7 @@ async def _floor_committee(committee_id: int) -> None:
 )
 async def public_committee_portfolios(committee_id: int):
     """A committee's official portfolio matrix, in sheet order; [] for a committee without
-    one (CCC, IPC), whose EBs add anyone. Public, like the matrices themselves."""
+    one (IPC), whose EBs add anyone. Public, like the matrices themselves."""
     await _floor_committee(committee_id)
     return await _committee_matrix(committee_id)
 

@@ -287,7 +287,7 @@ smartboard follows it live.
     client that sends anything is closed with 1008; 4404 unknown committee; at most 30
     viewers per committee, then 1013; a client that stops taking frames is closed, 1011).
  5. `GET /public/committees/{id}/portfolios`: the committee's official portfolio matrix in
-    sheet order (`[]` for CCC and IPC). For a committee with a matrix, `add` takes the
+    sheet order (`[]` for IPC). For a committee with a matrix, `add` takes the
     matrix's own name and flag (or party tag, PSC); anything else is added as a person.
  6. Smartboard: `/static/live_gsl.html?committee=<id>` (the choice is also remembered;
     press C to switch). Flags come from the flag-icons CDN.
