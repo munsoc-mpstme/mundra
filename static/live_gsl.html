@@ -434,6 +434,31 @@
   // ---------- rendering ----------
   // A flag; for a person, their party badge (PSC) or else a person icon.
   function flagEl(code, tag) {
+    const PSC_TAG_FLAGS = {
+      "INC": "/static/flags/psc_inc.png",
+      "AITC": "/static/flags/psc_aitc.png",
+      "BJP": "/static/flags/psc_bjp.png",
+      "IUML": "/static/flags/psc_iuml.png",
+      "SS(UBT)": "/static/flags/psc_ss_ubt.png",
+      "AAP": "/static/flags/psc_aap.png",
+      "RJD": "/static/flags/psc_rjd.png",
+      "ASP(KR)": "/static/flags/psc_asp_kr.png",
+      "DMK": "/static/flags/psc_dmk.png",
+      "SHS": "/static/flags/psc_shs.png",
+      "NCPI": "/static/flags/psc_ncpi.png",
+      "TDP": "/static/flags/psc_tdp.png",
+      "NCP(SP)": "/static/flags/psc_ncp_sp.png",
+      "JKNC": "/static/flags/psc_jknc.png",
+      "CPI(M)": "/static/flags/psc_cpim.png",
+      "AIMIM": "/static/flags/psc_aimim.png",
+    };
+    if (tag && PSC_TAG_FLAGS[tag]) {
+      const img = document.createElement("img");
+      img.className = "flag";
+      img.alt = tag;
+      img.src = PSC_TAG_FLAGS[tag];
+      return img;
+    }
     if (!code && tag) {
       const b = document.createElement("span");
       b.className = "tag";
