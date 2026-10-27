@@ -1,0 +1,22 @@
+{
+  "guides": [
+    {
+      "committee": "UNSC",
+      "agendas": [
+        {
+          "title": "UNSC",
+          "url": null
+        }
+      ]
+    },
+    {
+      "committee": "IPC",
+      "agendas": [
+        {
+          "title": "IPC",
+          "url": null
+        }
+      ]
+    }
+  ]
+}
