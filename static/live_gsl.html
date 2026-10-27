@@ -27,6 +27,7 @@
     --ink: #FFFFFF;
     --muted: #9A8F94;
     --danger: #FF4E27;
+    --over: #FF2D2D;
     /* Brand colourways: exact 4 signature hex colours without gradients. */
     --pink: #EE1C9C;
     --pink-accent: #FFFD2A;
@@ -182,6 +183,17 @@
   }
   #clock.low { color: var(--danger); text-shadow: 0 0 1px #000; }
   #clock.idle { opacity: .55; }
+  /* Overtime (-00:12): red figures on a black chip with a pulsing glow, readable from the back
+     of the room on every colourway. A touch smaller, as the minus sign needs the room. */
+  #clock.over {
+    display: inline-block; color: var(--over); background: #000; border-radius: 20px;
+    padding: 4px 18px 6px; font-size: 88px; animation: overpulse 1s ease-in-out infinite;
+  }
+  @keyframes overpulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--over); }
+    50% { box-shadow: 0 0 0 4px rgba(255,45,45,.25), 0 0 34px 8px rgba(255,45,45,.6); }
+  }
+  #state.over { display: inline-block; color: var(--over); background: #000; border-radius: 8px; padding: 3px 10px; }
   .bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.35); overflow: hidden; }
   .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
   #state { font-size: 16px; font-weight: 700; letter-spacing: 2px; margin-top: 8px; min-height: 20px; }
@@ -193,6 +205,7 @@
   }
   body.view-unmod #timer { width: min(900px, 90vw); padding: 40px 48px; text-align: center; }
   body.view-unmod #clock { font-size: min(24vw, 250px); } /* Inter's digits are wide: fits the box */
+  body.view-unmod #clock.over { font-size: min(19vw, 205px); }
   body.view-unmod #timer .who { justify-content: center; }
 
   /* --- bottom left: list size and connection --- */
@@ -587,17 +600,17 @@
       const secs = view === "unmod" ? 0 : state.lists[view].speaker_seconds;
       return { ms: secs * 1000, total: secs * 1000, mode: "idle" };
     }
+    // The server lets a timer run past its end (overtime) until the EB ends the speech.
     const total = t.duration * 1000;
-    if (t.running) {
-      const ms = Math.max(0, t.ends_at - (Date.now() + offset));
-      return { ms, total, mode: ms > 0 ? "running" : "done" };
-    }
-    return { ms: t.remaining_ms, total, mode: t.remaining_ms > 0 ? "paused" : "done" };
+    const ms = t.running ? t.ends_at - (Date.now() + offset) : t.remaining_ms;
+    return { ms, total, mode: ms <= 0 ? "over" : (t.running ? "running" : "paused") };
   }
 
+  // "01:30"; below zero "-00:12", capped at 99:59 either way.
   function fmt(ms) {
     const s = Math.ceil(ms / 1000);
-    return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+    const a = Math.min(Math.abs(s), 5999);
+    return (s < 0 ? "-" : "") + String(Math.floor(a / 60)).padStart(2, "0") + ":" + String(a % 60).padStart(2, "0");
   }
 
   function tick() {
@@ -608,10 +621,12 @@
       lastClockText = text;
       clock.textContent = text;
       clock.classList.toggle("idle", mode === "idle");
-      clock.classList.toggle("low", (mode === "running" || mode === "paused" || mode === "done") && ms <= 10000);
-      $("state").textContent = { paused: "PAUSED", done: "TIME", running: "", idle: "" }[mode];
+      clock.classList.toggle("low", (mode === "running" || mode === "paused") && ms <= 10000);
+      clock.classList.toggle("over", mode === "over");
+      $("state").textContent = { paused: "PAUSED", over: "OVERTIME", running: "", idle: "" }[mode];
+      $("state").classList.toggle("over", mode === "over");
     }
-    $("bar").style.width = mode === "idle" || !total ? "0%" : `${(100 * (total - ms)) / total}%`;
+    $("bar").style.width = mode === "idle" || !total ? "0%" : `${Math.min(100, (100 * (total - ms)) / total)}%`;
   }
 
   function loop() { tick(); requestAnimationFrame(loop); }

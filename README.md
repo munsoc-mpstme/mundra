@@ -293,13 +293,48 @@ smartboard follows it live.
     press C to switch). Flags come from the flag-icons CDN.
 
 The timer is stored as an absolute end time on the server clock, so phones and the board
-draw the same countdown. When a speaker's time runs out the server removes that speaker
-(by id) and leaves the timer idle for the EB to start the next one. The floor is saved in
+draw the same countdown. A timer that runs out keeps running into overtime (speeches go
+over, and the EB needs to see by how much): the app, EB Tools on the web and the board all
+show it as -MM:SS in red on a black chip, until the EB presses Next or Reset. Nothing
+happens on the server at the end, so there is no background task. A timer in overtime gives
+way: starting the next one doesn't need `replace`. The floor is saved in
 `committee_floors` (one JSON row per committee), so a restart or redeploy keeps the lists
 and resumes a running timer. Fan-out is in-process, so it needs a single worker. Each
 socket has its own writer that sends only the newest state, so an EB's tap never waits for
 a slow board; an op that can't get the committee's lock within 10 s (a stalled database)
 gets 503 instead of landing much later.
+
+### EB Tools on the web (`static/ebtools.html`)
+
+The app's EB Tools screen as a web page for an EB's laptop, with the GSL, Mod and Timer side
+by side. It
+signs in with the same account (`eb.tools` permission) and uses only the endpoints above, so
+the phone, the laptop and the smartboard follow one floor. The server serves it, with every
+URL in it under the prefix it was reached by:
+
+ - `/ebtools` on the API itself (e.g. `https://mundra.onrender.com/ebtools`).
+ - `/` of any host starting with `ebtools.` (a custom domain pointed at the API).
+ - `mumbaimun.com/ebtools/`, through the main site's nginx. It forwards that path here with
+   the prefix stripped and an `X-Forwarded-Prefix` header, for both HTTP and the WebSocket:
+
+   ```nginx
+   location = /ebtools { return 301 /ebtools/; }
+   location /ebtools/ {
+       proxy_pass https://mundra.onrender.com/;
+       proxy_ssl_server_name on;
+       proxy_set_header Host mundra.onrender.com;
+       proxy_set_header X-Forwarded-Prefix /ebtools;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_http_version 1.1;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection "upgrade";
+       proxy_read_timeout 3600s;
+   }
+   ```
+
+`static/ebtools_portfolios.js` is the app's country list (`kPortfolios` in Delego's
+`lib/constants/portfolios.dart`), generated from it for the search box; regenerate it rather
+than editing it by hand.
 
 ## Delego app contract
 

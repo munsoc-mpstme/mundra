@@ -1362,15 +1362,6 @@ async def list_committee_portfolios(committee_id: int) -> list[dict]:
         ]
 
 
-async def list_running_floor_ids() -> list[int]:
-    """Committees whose floor timer was running when last saved (at most a few rows)."""
-    async with db.SessionLocal() as session:
-        rows = await session.execute(
-            select(db.CommitteeFloorRow.committee_id, db.CommitteeFloorRow.state)
-        )
-        return [cid for cid, state in rows if (state.get("timer") or {}).get("running")]
-
-
 async def get_committee(committee_id: int) -> models.Committee | None:
     async with db.SessionLocal() as session:
         row = await session.get(db.CommitteeRow, committee_id)

@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from io import StringIO
 import os
+from pathlib import Path
+import re
 from typing import Annotated
 import time
 import uuid
@@ -97,7 +99,6 @@ async def bootstrap_admin() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await bootstrap_admin()
-    await floor.hub.restore()
     yield
     await floor.hub.shutdown()
     await db.engine.dispose()
@@ -120,8 +121,44 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.get("/", tags=["Status"])
-def status():
+def status(request: Request):
+    # The laptop EB Tools answers on its own host (ebtools.<domain>) as well as at /ebtools;
+    # every other host, including the keep-alive ping, still gets the status message.
+    # Behind mumbaimun.com's nginx, mumbaimun.com/ebtools/ arrives here as "/" with an
+    # X-Forwarded-Prefix header (see README, "EB Tools on the web").
+    if request.headers.get("host", "").lower().startswith("ebtools.") or _forwarded_prefix(request):
+        return _ebtools_page(request)
     return {"message": "Server is up and running"}
+
+
+# A path prefix like "/ebtools": slash-separated plain segments only, since it is written into
+# the page's URLs.
+_PREFIX = re.compile(r"^(/[A-Za-z0-9_-]{1,32}){1,3}$")
+
+
+def _forwarded_prefix(request: Request) -> str:
+    """The path a reverse proxy serves this API under (X-Forwarded-Prefix), or "" if none or
+    if it isn't a plain path."""
+    prefix = request.headers.get("x-forwarded-prefix", "").rstrip("/")
+    return prefix if _PREFIX.match(prefix) else ""
+
+
+def _ebtools_page(request: Request) -> HTMLResponse:
+    """The page with every URL in it under the prefix the browser reached us by, so it calls
+    this API through the same proxy (and needs no CORS)."""
+    html = (Path("static") / "ebtools.html").read_text(encoding="utf-8")
+    # no-cache: the page is revalidated on every load, so a deploy reaches EBs straight away.
+    return HTMLResponse(
+        html.replace("__BASE__", _forwarded_prefix(request)),
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/ebtools", include_in_schema=False)
+@app.get("/ebtools/", include_in_schema=False)
+def ebtools(request: Request):
+    """EB Tools for laptops: the app's EB Tools (speakers' lists and timer) as a web page."""
+    return _ebtools_page(request)
 
 
 ####################
