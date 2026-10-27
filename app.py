@@ -1748,6 +1748,66 @@ def get_floor_plans():
     return read_floor_plans_data()
 
 
+STUDY_GUIDES_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "study_guides.json")
+STUDY_GUIDES_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static", "study_guides")
+
+
+def read_study_guides_data():
+    """Reads study guides config from data/study_guides.json and auto-discovers PDFs in static/study_guides/."""
+    try:
+        data = {"guides": []}
+        if os.path.exists(STUDY_GUIDES_FILE_PATH):
+            with open(STUDY_GUIDES_FILE_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict) and isinstance(loaded.get("guides"), list):
+                    data = loaded
+
+        guides_by_key = {
+            str(g.get("committee", "")).strip().upper(): g
+            for g in data.get("guides", [])
+            if isinstance(g, dict) and g.get("committee")
+        }
+
+        if os.path.isdir(STUDY_GUIDES_STATIC_DIR):
+            for fname in sorted(os.listdir(STUDY_GUIDES_STATIC_DIR)):
+                if not fname.lower().endswith(".pdf"):
+                    continue
+                stem = os.path.splitext(fname)[0].strip()
+                key = stem.upper()
+                static_url = f"/static/study_guides/{fname}"
+                if key in guides_by_key:
+                    agendas = guides_by_key[key].setdefault("agendas", [])
+                    if not agendas:
+                        agendas.append({"title": stem, "url": static_url})
+                    elif not agendas[0].get("url"):
+                        agendas[0]["url"] = static_url
+                else:
+                    entry = {
+                        "committee": stem,
+                        "agendas": [{"title": stem, "url": static_url}],
+                    }
+                    data.setdefault("guides", []).append(entry)
+                    guides_by_key[key] = entry
+
+        return data
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Error reading study guides data: Invalid JSON format")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error while fetching study guides data: {str(e)}")
+
+
+@app.get(
+    "/study_guides",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_study_guides():
+    """Returns backend-hosted study guides from data/study_guides.json and static/study_guides/."""
+    return read_study_guides_data()
+
+
 SCHEDULE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "schedule.json")
 
 
