@@ -175,6 +175,8 @@ async def register(request: Request, user: models.User):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -637,10 +639,27 @@ async def mm_register(request: Request, user: models.User):
                 )
             mm_delegate = await database.get_mm_delegate_by_email(user.email)
 
+            if not delegate.verified:
+                # Nobody has proven they own this email yet, so this is the same person
+                # trying again (they left the code screen, or the mail never came). The
+                # password they just typed replaces the first one, otherwise logging in
+                # with it fails as "Invalid password"; they get a fresh code.
+                await database.change_user_pass(user.email, user.password)
+
             if mm_delegate:
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Mumbai MUN Delegate already registered! ID: {mm_delegate.id}",
+                if delegate.verified:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Mumbai MUN Delegate already registered! ID: {mm_delegate.id}",
+                    )
+                email_sent = await _send_code_if_unverified(delegate)
+                return JSONResponse(
+                    status_code=201,
+                    content={
+                        "message": f"Mumbai MUN Delegate registered successfully! ID: {mm_delegate.id}",
+                        "verified": False,
+                        "email_sent": email_sent,
+                    },
                 )
 
             if user.contact or user.dateofbirth:

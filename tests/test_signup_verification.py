@@ -103,9 +103,65 @@ def test_signing_up_again_does_not_verify_the_account(client, monkeypatch):
         json={"firstname": "x", "lastname": "y", "email": email, "password": "another-pass-1"},
     )
 
-    assert again.status_code == 409  # already registered for Mumbai MUN
+    assert again.status_code == 201 and again.json()["verified"] is False
     assert verified(email) is False
-    assert login(client, email).status_code == 403
+    assert login(client, email, "another-pass-1").status_code == 403
+
+
+def test_signing_up_again_before_verifying_uses_the_new_password_and_resends_a_code(
+    client, monkeypatch
+):
+    sent = []
+
+    async def fake_send(delegate, code):
+        sent.append(code)
+
+    monkeypatch.setattr(mails, "send_verification_email", fake_send)
+    email, _ = sign_up(client)
+
+    again = client.post(
+        "/mumbaimun/register",
+        json={"firstname": "x", "lastname": "y", "email": email, "password": "another-pass-1"},
+    )
+
+    assert again.status_code == 201 and again.json()["email_sent"] is True
+    assert len(sent) == 2  # a fresh code went out with the second sign-up
+    # The password typed second is the one that counts; it was "Invalid password" before.
+    assert login(client, email, PASSWORD).status_code == 401
+    assert login(client, email, "another-pass-1").status_code == 403
+
+    ok = client.post("/verify_email", json={"email": email, "code": sent[-1]})
+    assert ok.status_code == 200
+    assert login(client, email, "another-pass-1").status_code == 200
+
+
+def test_signing_up_again_never_changes_a_verified_accounts_password(client, monkeypatch):
+    async def fake_send(delegate, code):
+        pass
+
+    monkeypatch.setattr(mails, "send_verification_email", fake_send)
+    email, _ = sign_up(client)
+    set_code(email, "654321")
+    assert client.post("/verify_email", json={"email": email, "code": "654321"}).status_code == 200
+
+    again = client.post(
+        "/mumbaimun/register",
+        json={"firstname": "x", "lastname": "y", "email": email, "password": "attacker-pass-1"},
+    )
+
+    assert again.status_code == 409
+    assert login(client, email, "attacker-pass-1").status_code == 401
+    assert login(client, email).status_code == 200
+
+
+def test_register_twice_is_a_409_not_a_500(client, monkeypatch):
+    async def fake_send(delegate, code):
+        pass
+
+    monkeypatch.setattr(mails, "send_verification_email", fake_send)
+    body = {"firstname": "a", "lastname": "b", "email": unique_email(), "password": PASSWORD}
+    assert client.post("/register", json=body).status_code == 201
+    assert client.post("/register", json=body).status_code == 409
 
 
 def test_an_existing_unverified_account_is_not_verified_by_registering_for_mun(client, monkeypatch):
@@ -123,6 +179,7 @@ def test_an_existing_unverified_account_is_not_verified_by_registering_for_mun(c
     assert res.status_code == 201
     assert res.json()["verified"] is False
     assert verified(email) is False
+    assert login(client, email).status_code == 403  # the password typed now is the live one
 
 
 def test_resend_gives_a_fresh_code(client, monkeypatch):
