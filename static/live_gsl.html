@@ -446,10 +446,15 @@
       p.innerHTML = PERSON_SVG; // a constant, never user data
       return p;
     }
+    const CUSTOM_FLAGS = {
+      "cn-ccp": "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="48" fill="#EE1C25"/><text x="6" y="26" font-size="24" fill="#FFDE00">&#9773;</text></svg>'),
+      "tw-kmt": "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="48" fill="#000095"/><polygon fill="#FFF" points="32,7 34.4,15.2 40.5,9.3 38.5,17.5 46.7,15.5 40.8,21.6 49,24 40.8,26.4 46.7,32.5 38.5,30.5 40.5,38.7 34.4,32.8 32,41 29.6,32.8 23.5,38.7 25.5,30.5 17.3,32.5 23.2,26.4 15,24 23.2,21.6 17.3,15.5 25.5,17.5 23.5,9.3 29.6,15.2"/><circle cx="32" cy="24" r="8.5" fill="#000095"/><circle cx="32" cy="24" r="7" fill="#FFF"/></svg>'),
+      "de-imp": "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 48"><rect width="64" height="16" y="0" fill="#111111"/><rect width="64" height="16" y="16" fill="#FFFFFF"/><rect width="64" height="16" y="32" fill="#DD0000"/></svg>'),
+    };
     const img = document.createElement("img");
     img.className = "flag";
     img.alt = "";
-    img.src = FLAG_BASE + encodeURIComponent(code) + ".svg";
+    img.src = CUSTOM_FLAGS[code] || (FLAG_BASE + encodeURIComponent(code) + ".svg");
     img.onerror = () => img.replaceWith(flagEl(null, null));
     return img;
   }

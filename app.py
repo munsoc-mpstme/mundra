@@ -1948,12 +1948,45 @@ async def _committee_exists(committee_id: int) -> bool:
 _matrices: dict[int, tuple[float, list[dict]]] = {}
 
 
+_CCC_FLAGS = {
+    "cornell franklin": "us",
+    "clarence edward gauss": "us",
+    "stirling fessenden": "us",
+    "addie viola smith": "us",
+    "sir william johnston keswick": "gb",
+    "kenneth bourne": "gb",
+    "frederick wernham gerrard": "gb",
+    "sir herbert phillips": "gb",
+    "frederick maze": "gb",
+    "victor sassoon": "gb",
+    "liu xiao": "cn-ccp",
+    "pan hannian": "tw",
+    "liu changsheng": "cn-ccp",
+    "kp chen": "tw",
+    "du yuesheng": "tw",
+    "yu xiaqing": "tw",
+    "huang jinrong": "tw",
+    "fu xiao'an": "tw",
+    "li shiqun": "tw",
+    "dai li": "tw-kmt",
+    "ding mocun": "tw",
+    "marcel baudez": "fr",
+    "robert jacquinot de besange": "fr",
+    "dr. oskar trautmann": "de-imp",
+}
+
+
 async def _committee_matrix(committee_id: int) -> list[dict]:
     now = time.monotonic()
     cached = _matrices.get(committee_id)
     if cached is not None and now - cached[0] < 300:
         return cached[1]
     matrix = await database.list_committee_portfolios(committee_id)
+    for p in matrix:
+        if not p.get("code"):
+            fallback_code = _CCC_FLAGS.get(str(p.get("name", "")).strip().casefold())
+            if fallback_code:
+                p["code"] = fallback_code
     _matrices[committee_id] = (now, matrix)
     return matrix
 
