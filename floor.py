@@ -10,18 +10,18 @@ survives a restart. The timer is stored as an absolute end time (ends_at, epoch 
 server clock), never as a ticking counter, so clients draw the countdown themselves and a
 locked phone or a reconnecting board is never out of step.
 
-When a speaker's time runs out, settle() removes that speaker (by id, so a reorder by the
-other EB can't remove the wrong delegate) and leaves the timer idle for the next one. It
-runs on every read and every change, so this never depends on the background task; the
-task only makes it happen on time and tells the boards. Single process only, like chat.py.
-Each watching socket has its own writer (Viewer), so a slow one never delays an op.
+A timer that runs out keeps running into overtime: speeches and caucuses do go over, and
+the EB needs to see by how much. Clients draw ends_at - now below zero as -MM:SS. Nothing
+happens on the server at the end; the speech ends when the EB presses Next (or Reset), so
+there is no background task. A timer in overtime has done its job, so it doesn't block
+starting the next one. Single process only, like chat.py. Each watching socket has its own
+writer (Viewer), so a slow one never delays an op.
 """
 
 import asyncio
 import contextlib
 import copy
 import json
-import logging
 import time
 import uuid
 from collections import defaultdict
@@ -41,7 +41,6 @@ HEARTBEAT_SECONDS = 20
 # database) before giving up with 503, instead of piling up and landing much later.
 LOCK_TIMEOUT_SECONDS = 10
 
-log = logging.getLogger("uvicorn.error")
 
 
 class FloorError(Exception):
@@ -65,7 +64,7 @@ def idle_timer() -> dict:
         "duration": 0,  # seconds, for the progress bar
         "running": False,
         "ends_at": None,  # epoch ms on the server clock, while running
-        "remaining_ms": 0,  # while paused (or 0 when an unmod has ended)
+        "remaining_ms": 0,  # while paused; below 0 when paused in overtime
     }
 
 
@@ -100,8 +99,19 @@ def _index_of(entries: list[dict], entry_id: str) -> int:
 
 
 def _timer_is_active(timer: dict) -> bool:
-    """Running, or paused with time left. A finished unmod (0 left) is not active."""
-    return timer["kind"] != "idle" and (timer["running"] or timer["remaining_ms"] > 0)
+    """Running or paused, overtime included: only Reset (or Next) ends a timer."""
+    return timer["kind"] != "idle"
+
+
+def _left_ms(timer: dict, now: int) -> int:
+    """Time left on an active timer; below 0 in overtime."""
+    return timer["ends_at"] - now if timer["running"] else timer["remaining_ms"]
+
+
+def _timer_blocks(timer: dict, now: int) -> bool:
+    """Starting another timer needs replace=True: one with time still left is running or
+    paused. One in overtime is finished and only being counted, so it gives way."""
+    return _timer_is_active(timer) and _left_ms(timer, now) > 0
 
 
 def _times(timer: dict, list_name: str) -> bool:
@@ -117,20 +127,6 @@ def current_speaker(state: dict, list_name: str) -> dict | None:
             if entry["id"] == timer["speaker_id"]:
                 return entry
     return entries[0] if entries else None
-
-
-def settle(state: dict, now: int) -> bool:
-    """Apply a timer that has run out. Returns whether anything changed."""
-    timer = state["timer"]
-    if not (timer["running"] and timer["ends_at"] is not None and now >= timer["ends_at"]):
-        return False
-    if timer["kind"] == "speaker":
-        entries = _entries(state, timer["list"])
-        entries[:] = [e for e in entries if e["id"] != timer["speaker_id"]]
-        state["timer"] = idle_timer()
-    else:  # an unmod stops at 00:00 and stays on the board until it is reset
-        timer.update(running=False, ends_at=None, remaining_ms=0)
-    return True
 
 
 def apply_op(state: dict, op: dict, now: int) -> None:
@@ -177,11 +173,11 @@ def apply_op(state: dict, op: dict, now: int) -> None:
         name = op["list"]
         if _times(timer, name) and timer["running"]:
             return  # the other EB already started it
-        if _times(timer, name) and timer["remaining_ms"] > 0:
+        if _times(timer, name):  # paused (in overtime too): carry on
             _resume(state, now)
             state["display"] = name
             return
-        if _timer_is_active(timer) and not op["replace"]:
+        if _timer_blocks(timer, now) and not op["replace"]:
             raise FloorError(409, "Another timer is running")
         speaker = current_speaker(state, name)
         if speaker is None:
@@ -200,7 +196,7 @@ def apply_op(state: dict, op: dict, now: int) -> None:
         state["display"] = name
 
     elif kind == "start_unmod":
-        if timer["kind"] == "speaker" and _timer_is_active(timer) and not op["replace"]:
+        if timer["kind"] == "speaker" and _timer_blocks(timer, now) and not op["replace"]:
             raise FloorError(409, "Another timer is running")
         seconds = op["seconds"]
         state["timer"] = {
@@ -217,7 +213,7 @@ def apply_op(state: dict, op: dict, now: int) -> None:
         if timer["running"]:
             timer.update(
                 running=False,
-                remaining_ms=max(0, timer["ends_at"] - now),
+                remaining_ms=timer["ends_at"] - now,  # below 0 in overtime
                 ends_at=None,
             )
 
@@ -313,21 +309,14 @@ class Viewer:
         self._task.cancel()
 
 
-def _due(state: dict, now: int) -> bool:
-    """A timer has run out and settle() has work to do."""
-    timer = state["timer"]
-    return bool(timer["running"] and timer["ends_at"] is not None and now >= timer["ends_at"])
-
-
 class FloorHub:
     """Holds each committee's floor (cached, backed by committee_floors), applies ops one at
-    a time per committee, runs the expiry timers and pushes every change to the viewers."""
+    a time per committee and pushes every change to the viewers."""
 
     def __init__(self) -> None:
         self._states: dict[int, dict] = {}
         self._locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._viewers: defaultdict[int, set[Viewer]] = defaultdict(set)
-        self._expiry: dict[int, asyncio.Task] = {}
 
     # --- viewers ---------------------------------------------------------------------
 
@@ -378,7 +367,6 @@ class FloorHub:
         if state is None:
             state = await database.get_floor_state(committee_id) or new_state()
             self._states[committee_id] = state
-            self._schedule(committee_id, state)
         return state
 
     async def _commit(self, committee_id: int, state: dict, email: str | None) -> None:
@@ -389,79 +377,31 @@ class FloorHub:
             state["updated_by"] = email
         await database.save_floor_state(committee_id, state, email)
         self._states[committee_id] = state
-        self._schedule(committee_id, state)
         self._broadcast(committee_id, state)
 
     async def snapshot(self, committee_id: int) -> dict:
-        """The current floor, with a timer that ran out already applied. Served from the
-        cache without waiting for the lock when there is nothing to settle, so reads (the
-        boards' polls, heartbeats) never queue behind ops."""
+        """The current floor. Served from the cache without waiting for the lock, so reads
+        (the boards' polls, heartbeats) never queue behind ops."""
         cached = self._states.get(committee_id)
-        if cached is not None and not _due(cached, now_ms()):
-            return copy.deepcopy(cached)
-        async with self._locked(committee_id):
-            state = copy.deepcopy(await self._load(committee_id))
-            if settle(state, now_ms()):
-                await self._commit(committee_id, state, None)
-        return state
+        if cached is None:
+            async with self._locked(committee_id):
+                cached = await self._load(committee_id)
+        return copy.deepcopy(cached)
 
     async def apply(self, committee_id: int, op: dict, email: str) -> dict:
         """Apply one op; the viewers get the result without the caller waiting for them.
         Raises FloorError."""
         async with self._locked(committee_id):
             state = copy.deepcopy(await self._load(committee_id))
-            now = now_ms()
-            settled = settle(state, now)
-            try:
-                apply_op(state, op, now)
-            except FloorError:
-                if settled:  # still record the speaker whose time ran out
-                    await self._commit(committee_id, state, None)
-                raise
+            apply_op(state, op, now_ms())
             await self._commit(committee_id, state, email)
         return state
-
-    # --- expiry ----------------------------------------------------------------------
-
-    def _schedule(self, committee_id: int, state: dict) -> None:
-        old = self._expiry.pop(committee_id, None)
-        if old is not None and old is not asyncio.current_task():
-            old.cancel()
-        timer = state["timer"]
-        if timer["running"] and timer["ends_at"] is not None:
-            self._expiry[committee_id] = asyncio.create_task(
-                self._expire(committee_id, timer["ends_at"])
-            )
-
-    async def _expire(self, committee_id: int, ends_at: int) -> None:
-        # A little after the end, so the board's own countdown reaches 00:00 first.
-        await asyncio.sleep(max(0, ends_at - now_ms()) / 1000 + 0.05)
-        try:
-            await self.snapshot(committee_id)
-        except Exception:
-            log.exception("Could not settle the floor timer of committee %s", committee_id)
-
-    async def restore(self) -> None:
-        """On startup: reschedule the timers that were running when the server stopped (and
-        settle any that ran out meanwhile). A problem is logged, never raised."""
-        try:
-            for committee_id in await database.list_running_floor_ids():
-                await self.snapshot(committee_id)
-        except Exception:
-            log.exception("Could not restore the committee floor timers")
 
     async def shutdown(self) -> None:
         for viewers in list(self._viewers.values()):
             for viewer in list(viewers):
                 viewer.stop()
         self._viewers.clear()
-        tasks = list(self._expiry.values())
-        self._expiry.clear()
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
 
     def forget(self) -> None:
         """Drop the cache (tests use this to prove the state comes back from the DB)."""

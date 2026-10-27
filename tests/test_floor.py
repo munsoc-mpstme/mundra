@@ -164,7 +164,7 @@ def test_the_list_has_a_limit(client, committee, eb, monkeypatch):
 # --- the speaker timer ------------------------------------------------------------------
 
 
-def test_time_running_out_removes_the_speaker_and_waits(client, committee, eb, clock):
+def test_time_running_out_keeps_the_speaker_in_overtime(client, committee, eb, clock):
     add(client, committee, eb, "India", "France")
     op(client, committee, eb, op="set_speaker_time", list="gsl", seconds=60)
     res = op(client, committee, eb, op="start_speaker", list="gsl")
@@ -175,21 +175,44 @@ def test_time_running_out_removes_the_speaker_and_waits(client, committee, eb, c
     assert body["server_now"] == clock["ms"]
     assert body["state"]["display"] == "gsl"
 
-    clock["ms"] += 59_000
-    assert names(state(client, committee)) == ["India", "France"]
-    clock["ms"] += 1_000
+    # Speeches go over: at and past the end nothing happens; clients draw ends_at - now
+    # below zero (-00:15) until the EB presses Next.
+    clock["ms"] += 75_000
     st = state(client, committee)
-    assert names(st) == ["France"]
-    assert st["timer"]["kind"] == "idle" and not st["timer"]["running"]
+    assert names(st) == ["India", "France"]
+    assert st["timer"]["running"] and st["timer"]["ends_at"] - clock["ms"] == -15_000
+    india = st["lists"]["gsl"]["entries"][0]["id"]
+    st = op(client, committee, eb, op="next", list="gsl", entry_id=india).json()["state"]
+    assert names(st) == ["France"] and st["timer"]["kind"] == "idle"
 
 
-def test_expiry_removes_the_timed_speaker_even_after_a_reorder(client, committee, eb, clock):
-    st = add(client, committee, eb, "India", "France")
-    france = st["lists"]["gsl"]["entries"][1]["id"]
+def test_pausing_in_overtime_keeps_the_overtime(client, committee, eb, clock):
+    add(client, committee, eb, "India")
+    op(client, committee, eb, op="set_speaker_time", list="gsl", seconds=30)
     op(client, committee, eb, op="start_speaker", list="gsl")
-    op(client, committee, eb, op="move", list="gsl", entry_id=france, to_index=0)
-    clock["ms"] += 90_000
-    assert names(state(client, committee)) == ["France"]
+    clock["ms"] += 42_000
+    timer = op(client, committee, eb, op="pause").json()["state"]["timer"]
+    assert not timer["running"] and timer["remaining_ms"] == -12_000
+    clock["ms"] += 60_000  # paused: the overtime doesn't grow
+    timer = op(client, committee, eb, op="resume").json()["state"]["timer"]
+    assert timer["running"] and timer["ends_at"] == clock["ms"] - 12_000
+    # Start on the paused overtime speaker carries on too (the other EB tapping Start).
+    op(client, committee, eb, op="pause")
+    timer = op(client, committee, eb, op="start_speaker", list="gsl").json()["state"]["timer"]
+    assert timer["running"] and timer["ends_at"] == clock["ms"] - 12_000
+
+
+def test_a_timer_in_overtime_gives_way_to_the_next_one(client, committee, eb, clock):
+    add(client, committee, eb, "India")
+    add(client, committee, eb, "Chile", list_name="mod")
+    op(client, committee, eb, op="set_speaker_time", list="gsl", seconds=10)
+    op(client, committee, eb, op="start_speaker", list="gsl")
+    clock["ms"] += 9_000  # time still left: starting another needs replace
+    assert op(client, committee, eb, op="start_speaker", list="mod").status_code == 409
+    clock["ms"] += 2_000  # in overtime: it has done its job
+    st = op(client, committee, eb, op="start_speaker", list="mod").json()["state"]
+    assert st["timer"]["list"] == "mod"
+    assert names(st, "gsl") == ["India"]  # nobody is removed by giving way
 
 
 def test_pause_and_resume_keep_the_time_left(client, committee, eb, clock):
@@ -198,7 +221,7 @@ def test_pause_and_resume_keep_the_time_left(client, committee, eb, clock):
     clock["ms"] += 30_000
     timer = op(client, committee, eb, op="pause").json()["state"]["timer"]
     assert not timer["running"] and timer["remaining_ms"] == 60_000
-    clock["ms"] += 600_000  # a paused timer never runs out
+    clock["ms"] += 600_000  # a paused timer stands still
     assert names(state(client, committee)) == ["India"]
     timer = op(client, committee, eb, op="resume").json()["state"]["timer"]
     assert timer["running"] and timer["ends_at"] == clock["ms"] + 60_000
@@ -231,15 +254,17 @@ def test_next_needs_the_speaker(client, committee, eb):
     assert op(client, committee, eb, op="next", list="gsl").status_code == 422
 
 
-def test_next_after_the_time_ran_out_removes_nobody_else(client, committee, eb, clock):
-    """The review's scenario: the server already took India off at 00:00; the EB then
-    confirms "End India's speech?". Brazil must stay."""
+def test_next_after_the_time_ran_out_removes_only_that_speaker(client, committee, eb, clock):
+    """The review's scenario, now with overtime: India's time ran out and India is still
+    on (in overtime); both EBs confirm "End India's speech?". Only India goes."""
+    vice = auth_header(make(role="eb"))
     st = add(client, committee, eb, "India", "Brazil", "Chad")
     india = st["lists"]["gsl"]["entries"][0]["id"]
     op(client, committee, eb, op="set_speaker_time", list="gsl", seconds=5)
     op(client, committee, eb, op="start_speaker", list="gsl")
     clock["ms"] += 6_500
-    res = op(client, committee, eb, op="next", list="gsl", entry_id=india)
+    assert op(client, committee, eb, op="next", list="gsl", entry_id=india).status_code == 200
+    res = op(client, committee, vice, op="next", list="gsl", entry_id=india)
     assert res.status_code == 409
     assert res.json()["detail"] == "That speaker has already finished"
     assert names(state(client, committee)) == ["Brazil", "Chad"]
@@ -299,16 +324,16 @@ def test_another_timer_needs_replace(client, committee, eb, clock):
 # --- unmod ------------------------------------------------------------------------------
 
 
-def test_unmod_runs_down_and_stays_at_zero(client, committee, eb, clock):
+def test_unmod_runs_into_overtime(client, committee, eb, clock):
     add(client, committee, eb, "India")
     st = op(client, committee, eb, op="start_unmod", seconds=600).json()["state"]
     assert st["display"] == "unmod" and st["timer"]["kind"] == "unmod"
-    clock["ms"] += 600_000
+    clock["ms"] += 630_000
     st = state(client, committee)
-    assert st["timer"]["kind"] == "unmod" and not st["timer"]["running"]
-    assert st["timer"]["remaining_ms"] == 0
+    assert st["timer"]["kind"] == "unmod" and st["timer"]["running"]
+    assert st["timer"]["ends_at"] - clock["ms"] == -30_000
     assert names(st) == ["India"]
-    # A finished unmod doesn't block the next speaker.
+    # An unmod in overtime doesn't block the next speaker.
     assert op(client, committee, eb, op="start_speaker", list="gsl").status_code == 200
 
 
@@ -327,8 +352,10 @@ def test_the_floor_survives_a_restart(client, committee, eb, clock):
     st = state(client, committee)
     assert names(st) == ["India", "France"] and st["timer"]["running"]
     floor.hub.forget()
-    clock["ms"] += 90_000
-    assert names(state(client, committee)) == ["France"]
+    clock["ms"] += 100_000  # past the end while restarting: still counting overtime
+    st = state(client, committee)
+    assert names(st) == ["India", "France"]
+    assert st["timer"]["running"] and st["timer"]["ends_at"] - clock["ms"] == -10_000
 
 
 def test_version_goes_up_on_every_change(client, committee, eb):

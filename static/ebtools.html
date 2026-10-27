@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EB Tools · Mumbai MUN'26</title>
+<link rel="icon" href="__BASE__/static/logo_solid.webp">
+<!--
+  EB Tools on the web: the Delego app's EB Tools screen for an EB's laptop. Two bars: the tabs
+  (GSL / Mod / Timer) choose what this laptop shows and are only this laptop's; the switch with
+  the screen icon chooses what the smartboard shows, for everyone. It talks to the same API as the app (POST /login, GET /delegates/me,
+  GET/POST /committees/{id}/floor, WS /ws/committees/{id}/floor,
+  GET /public/committees/{id}/portfolios), so the phone, this page and the smartboard
+  (/static/live_gsl.html) all follow one floor.
+
+  Served by the API itself (app.py, ebtools): at /ebtools, at the root of an ebtools.* host, and
+  behind mumbaimun.com's nginx at mumbaimun.com/ebtools/. __BASE__ is filled in by the server
+  with the path prefix every URL here needs ("" direct, "/ebtools" through the proxy), so the page
+  never needs CORS. Open with ?committee=<id> to skip the picker.
+-->
+<style>
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("__BASE__/static/fonts/Inter-Regular.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap;
+    src: url("__BASE__/static/fonts/Inter-Bold.woff2") format("woff2");
+  }
+  :root {
+    --bg: #0a0a0a;
+    --card: #1b1b1d;
+    --card-line: #2c2c2f;
+    --ink: #ffffff;
+    --muted: #8e8e93;
+    --tab-blue: #2f6bff;
+    --over: #ff2d2d;
+    --danger: #ff4e27;
+    /* The app's colourways: one per mode, exact hex, no gradients. */
+    --pink: #ee1c9c;   --pink-accent: #fffd2a;
+    --blue: #2a5cff;   --blue-accent: #bfff00;
+    --green: #159555;  --green-accent: #27ffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.35 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .hidden { display: none !important; }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; background: none; border: 0; padding: 0; }
+  button:disabled { cursor: not-allowed; }
+  :focus-visible { outline: 2px solid var(--pink-accent); outline-offset: 3px; }
+  h1, h2, h3, p { margin: 0; }
+  .muted { color: var(--muted); }
+  svg { display: block; }
+
+  /* ---------- sign in & committee picker ---------- */
+  .screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+  .card {
+    width: min(440px, 100%); background: #141414; border: 1px solid var(--card-line);
+    border-radius: 28px; padding: 32px; display: grid; gap: 16px;
+  }
+  .card img { width: 64px; height: 64px; object-fit: contain; }
+  .card h1 { font-size: 26px; }
+  .card label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+  .field {
+    width: 100%; background: var(--card); border: 1px solid var(--card-line); border-radius: 16px;
+    padding: 14px 16px;
+  }
+  .field:focus { border-color: var(--tab-blue); outline: none; }
+  .err { color: var(--danger); min-height: 1.4em; font-size: 14px; }
+  .btn-white { background: #fff; color: #000; font-weight: 700; border-radius: 999px; padding: 14px 20px; }
+  .btn-white:disabled { opacity: .5; }
+  .btn-line { border: 1px solid var(--card-line); border-radius: 14px; padding: 12px 16px; }
+  .btn-line:hover { border-color: #55555a; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  .choices button { padding: 16px 10px; font-weight: 700; font-size: 17px; }
+
+  /* ---------- the EB Tools screen ---------- */
+  .wrap { height: 100vh; display: flex; flex-direction: column; padding: 0 24px 20px; max-width: 1240px; margin: 0 auto; }
+  .topbar { display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; height: 64px; }
+  .iconbtn { width: 48px; height: 48px; border-radius: 999px; display: grid; place-items: center; }
+  .iconbtn:hover { background: #1b1b1d; }
+  .iconbtn svg { width: 26px; height: 26px; fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+  .iconbtn.more svg { fill: #fff; stroke: none; }
+  .title { text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .title h1 { font-size: 28px; font-weight: 700; letter-spacing: .02em; }
+  .dot { width: 9px; height: 9px; border-radius: 999px; background: #34c759; flex: none; }
+  .dot.off { background: var(--danger); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .connnote { text-align: center; font-size: 13px; color: var(--danger); margin: -10px 0 6px; }
+
+
+  .tabs { display: flex; border-bottom: 1px solid #2a2a2d; margin-bottom: 14px; }
+  .tabs button { flex: 1; padding: 12px 0 14px; font-size: 18px; position: relative; color: #fff; }
+  .tabs button:hover:not(.on) { color: #c7c7cc; }
+  .tabs button.on { font-weight: 700; }
+  .tabs button[data-tab="gsl"].on { color: var(--pink); }
+  .tabs button[data-tab="mod"].on { color: var(--blue); }
+  .tabs button[data-tab="unmod"].on { color: var(--green); }
+  .tabs button.on::after {
+    content: ""; position: absolute; left: 50%; bottom: -1px; transform: translateX(-50%);
+    width: 64px; height: 4px; border-radius: 4px 4px 0 0; background: currentColor;
+  }
+  /* A timer is running in a view this laptop isn't showing. */
+  .tabs .run { display: inline-block; width: 7px; height: 7px; border-radius: 9px; background: var(--over); margin-left: 7px; vertical-align: middle; }
+
+  .displayrow { display: flex; align-items: center; gap: 14px; padding: 0 0 18px; }
+  .boardlbl { color: var(--muted); font-size: 14px; white-space: nowrap; }
+  .displayrow > svg { width: 28px; height: 28px; flex: none; fill: none; stroke: #fff; stroke-width: 2.2; }
+  .seg { flex: 1; display: flex; border: 2px solid #fff; border-radius: 999px; overflow: hidden; }
+  .seg button { flex: 1; padding: 8px 0; font-size: 17px; font-weight: 700; }
+  .seg button + button { border-left: 1px solid #fff; }
+  /* The lit button takes its view's colour, like the timer below it. */
+  .seg button[data-view="gsl"].on { background: var(--pink); color: var(--pink-accent); }
+  .seg button[data-view="mod"].on { background: var(--blue); color: var(--blue-accent); }
+  .seg button[data-view="unmod"].on { background: var(--green); color: var(--green-accent); }
+  .seg button:hover:not(.on) { background: #161616; }
+
+  /* One view at a time (GSL, Mod or Unmod); a list scrolls inside it, above its timer. */
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+  .col {
+    min-height: 0; min-width: 0; display: flex; flex-direction: column;
+    background: #111112; border: 1px solid #222225; border-radius: 32px; padding: 18px 18px 0;
+  }
+  /* Left: the list (or, for an unmod, the lengths to pick); right: that view's timer. */
+  .col.gsl, .col.mod, .col.unmod {
+    display: grid; grid-template-columns: minmax(0, 1fr) 360px; column-gap: 22px;
+    grid-template-rows: auto auto minmax(0, 1fr); padding-bottom: 18px;
+  }
+  .col > .colhead, .col > .searchrow, .col > ol.entries { grid-column: 1; }
+  .col > ol.entries { grid-row: 3; }
+  .col > .sheet { grid-column: 2; grid-row: 1 / span 3; align-self: start; }
+  .col.unmod { grid-template-rows: auto auto minmax(0, 1fr); overflow: auto; }
+  .col.unmod > .unmodcard { grid-column: 2; grid-row: 1; }
+  .col.unmod > .unmodbtns { grid-column: 2; grid-row: 2; align-self: start; }
+  .col.unmod > .startunmod { grid-column: 1; grid-row: 1 / span 3; }
+  .col.unmod > .hint { grid-column: 1 / -1; }
+  .colhead { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 2px; }
+  .colhead h2 { font-size: 20px; font-weight: 700; }
+  .colhead h2::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 9px; background: var(--list); margin-right: 10px; vertical-align: 2px; }
+  .colhead .count { color: var(--muted); font-size: 14px; }
+
+  /* list tabs */
+  .searchrow { display: flex; align-items: center; gap: 6px; padding: 12px 0 12px; position: relative; }
+  .search {
+    flex: 1; display: flex; align-items: center; gap: 14px; background: #1e1e20;
+    border: 1px solid #2e2e31; border-radius: 24px; padding: 0 16px; height: 52px;
+  }
+  .search:focus-within { border-color: #4a4a4f; }
+  .search svg { width: 24px; height: 24px; fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; flex: none; }
+  .search input { flex: 1; background: none; border: 0; outline: none; font-size: 17px; min-width: 0; }
+  .search input::placeholder { color: #c7c7cc; }
+  .suggest {
+    position: absolute; left: 0; right: 0; top: calc(100% - 4px); z-index: 5;
+    background: #1e1e20; border: 1px solid #3a3a3e; border-radius: 20px; margin: 0;
+    padding: 8px; list-style: none; max-height: 380px; overflow: auto; box-shadow: 0 16px 40px rgba(0,0,0,.7);
+  }
+  .suggest li { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-radius: 12px; cursor: pointer; font-size: 17px; }
+  .suggest li.active, .suggest li:hover { background: #2c2c30; }
+  .suggest li.taken { opacity: .4; cursor: default; }
+  .suggest .sub { color: var(--muted); font-size: 13px; margin-left: auto; text-align: right; }
+
+  .menu {
+    position: absolute; right: 0; top: 58px; z-index: 6; min-width: 210px; background: #1e1e20;
+    border: 1px solid #3a3a3e; border-radius: 16px; padding: 6px; box-shadow: 0 16px 40px rgba(0,0,0,.7);
+  }
+  .menu button { display: block; width: 100%; text-align: left; padding: 11px 14px; border-radius: 10px; font-size: 16px; }
+  .menu button:hover { background: #2c2c30; }
+  .menu button.bad { color: var(--danger); }
+  .topmenu { position: relative; justify-self: end; }
+  .topmenu .menu { top: 52px; }
+
+  ol.entries { list-style: none; margin: 0 -6px; padding: 0 6px 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; flex: 1; min-height: 0; overflow: auto; }
+  ol.entries li {
+    display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 20px;
+    padding: 8px 8px 8px 14px; min-height: 62px; border: 2px solid transparent;
+  }
+  ol.entries li.cur { background: var(--list); }
+  ol.entries li.dragging { opacity: .35; }
+  ol.entries li.over { border-color: #fff; }
+  .num { width: 20px; text-align: center; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .namebox { flex: 1; min-width: 0; }
+  .nm { display: block; font-size: 18px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tagline { display: block; font-size: 14px; color: rgba(255,255,255,.85); margin-top: 2px; }
+  .rowbtn { width: 38px; height: 38px; border-radius: 999px; display: grid; place-items: center; flex: none; }
+  .rowbtn:hover { background: rgba(255,255,255,.12); }
+  .rowbtn svg { width: 21px; height: 21px; fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; }
+  .grip { cursor: grab; }
+  ol.entries li.empty { display: block; background: none; text-align: center; color: #fff; font-size: 16px; padding: 60px 12px; line-height: 1.5; }
+
+  .flag { width: 50px; height: 36px; object-fit: cover; border-radius: 8px; flex: none; }
+  .person, .tagb {
+    width: 50px; height: 36px; flex: none; border-radius: 8px; background: rgba(255,255,255,.12);
+    display: grid; place-items: center;
+  }
+  .person svg { width: 22px; height: 22px; fill: #fff; }
+  .tagb { font-size: 15px; font-weight: 700; color: var(--pink-accent); }
+  .suggest .flag, .suggest .person, .suggest .tagb { width: 36px; height: 26px; border-radius: 5px; }
+  .suggest .person svg { width: 16px; height: 16px; }
+  .suggest .tagb { font-size: 11px; }
+  .sheet .flag, .sheet .person, .sheet .tagb { width: 40px; height: 28px; border-radius: 6px; }
+
+  /* the bottom sheet of a list tab, and the unmod card */
+  .sheet { padding: 20px 22px 20px; background: var(--list); border-radius: 28px; }
+  .sheet .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .lbl { color: var(--accent); font-weight: 700; letter-spacing: .18em; font-size: 14px; }
+  .each { display: flex; align-items: center; gap: 8px; font-size: 16px; border-radius: 999px; padding: 6px 10px; margin-right: -10px; }
+  .each:hover { background: rgba(255,255,255,.14); }
+  .each svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; }
+  .speaker { display: flex; align-items: center; gap: 12px; margin-top: 10px; min-height: 30px; }
+  .speaker .who { font-size: 20px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bigclock {
+    font-size: 72px; font-weight: 700; line-height: 1; letter-spacing: -.01em;
+    font-variant-numeric: tabular-nums; margin: 6px 0 12px; color: #fff;
+  }
+  .bigclock.idle { color: rgba(255,255,255,.55); }
+  .bigclock.low { color: var(--accent); }
+  /* Overtime: red figures on a black chip, so it reads as urgent on the pink, blue and green
+     cards alike (red straight on pink would vanish), with a pulsing red glow. */
+  .bigclock.over {
+    display: inline-block; color: var(--over); background: #000; border-radius: 22px;
+    padding: 2px 18px 4px; animation: overpulse 1s ease-in-out infinite;
+  }
+  .bigclock.over.idle { color: var(--over); }
+  @keyframes overpulse {
+    0%, 100% { box-shadow: 0 0 0 3px var(--over); }
+    50% { box-shadow: 0 0 0 3px rgba(255,45,45,.25), 0 0 26px 6px rgba(255,45,45,.55); }
+  }
+  .overtag { color: var(--over); background: #000; border-radius: 6px; padding: 2px 8px; letter-spacing: .14em; }
+  .track { height: 10px; border-radius: 999px; background: rgba(0,0,0,.22); overflow: hidden; }
+  .track > div { height: 100%; width: 0; background: var(--accent); transition: width .25s linear; }
+  .controls { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+  .circle {
+    width: 52px; height: 52px; border-radius: 999px; background: rgba(255,255,255,.16);
+    display: grid; place-items: center; flex: none;
+  }
+  .circle svg { width: 24px; height: 24px; fill: none; stroke: #fff; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+  .circle.next svg { fill: #fff; stroke: none; }
+  .circle:hover:not(:disabled) { background: rgba(255,255,255,.26); }
+  .circle:disabled { opacity: .45; }
+  .play {
+    flex: 1; height: 56px; border-radius: 22px; background: #fff; color: #000; font-weight: 700;
+    font-size: 19px; display: flex; align-items: center; justify-content: center; gap: 16px;
+  }
+  .play svg { width: 20px; height: 20px; fill: #000; }
+  .play:disabled { background: rgba(255,255,255,.12); color: rgba(255,255,255,.45); }
+  .play:disabled svg { fill: rgba(255,255,255,.45); }
+
+  .gsl { --list: var(--pink); --accent: var(--pink-accent); }
+  .mod { --list: var(--blue); --accent: var(--blue-accent); }
+  .unmod { --list: var(--green); --accent: var(--green-accent); }
+
+  .unmodcard { background: var(--list); border-radius: 28px; padding: 24px 22px 26px; text-align: center; }
+  .unmodcard .lbl { letter-spacing: .24em; font-size: 14px; }
+  .unmodcard .bigclock { font-size: 72px; margin: 14px 0 12px; }
+  .unmodcard .state { letter-spacing: .2em; font-weight: 700; font-size: 13px; min-height: 18px; margin-bottom: 16px; }
+  .unmodbtns { display: flex; gap: 10px; margin-top: 12px; }
+  .unmodbtns button { flex: 1; padding: 13px; font-weight: 700; font-size: 16px; }
+  .startunmod { padding: 4px 0 8px; }
+  .startunmod h2 { font-size: 21px; font-weight: 400; }
+  .startunmod p { font-size: 15px; margin-top: 6px; color: #e5e5ea; }
+  .presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+  .presets button { border: 2px solid #2e2e31; border-radius: 16px; padding: 14px 0; font-size: 19px; }
+  .presets button:hover { border-color: #55555a; }
+  .custom { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; margin-top: 12px; border: 2px solid #2e2e31; border-radius: 16px; padding: 14px; font-size: 19px; }
+  .custom:hover { border-color: #55555a; }
+  .custom svg { width: 22px; height: 22px; fill: var(--tab-blue); }
+  .hint { color: var(--muted); font-size: 13px; text-align: center; padding: 18px 0 0; margin-top: auto; }
+  kbd { border: 1px solid #3a3a3e; border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; font: inherit; font-size: 12px; }
+
+  /* dialog + toasts */
+  dialog { background: #1c1c1e; color: var(--ink); border: 1px solid #3a3a3e; border-radius: 24px; padding: 26px; width: min(420px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  dialog h3 { font-size: 20px; margin-bottom: 8px; }
+  dialog .msg { color: var(--muted); margin-bottom: 16px; }
+  dialog .btns { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+  dialog .btns button { padding: 11px 20px; border-radius: 999px; font-weight: 700; }
+  #dlgCancel { border: 1px solid #3a3a3e; }
+  #dlgOk { background: #fff; color: #000; }
+  .dur { display: flex; align-items: center; gap: 10px; }
+  .dur input { width: 90px; text-align: center; font-size: 22px; padding: 10px; }
+  #toasts { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); display: grid; gap: 8px; z-index: 50; width: min(480px, 92vw); }
+  .toast {
+    background: #2c2c2e; border: 1px solid #48484a; border-radius: 16px; padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  }
+  .toast.bad { background: #3a1610; border-color: #7a2a1a; }
+  .toast span { flex: 1; }
+  .toast button { padding: 5px 12px; font-size: 14px; font-weight: 700; color: var(--pink-accent); }
+
+  /* A narrow window: the timer goes under the list. */
+  @media (max-width: 900px) {
+    .col.gsl, .col.mod, .col.unmod { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    .col > .sheet, .col.unmod > .unmodcard, .col.unmod > .unmodbtns, .col.unmod > .startunmod { grid-column: 1; grid-row: auto; }
+    .col > ol.entries { grid-row: auto; }
+    .col.unmod > .startunmod { padding-top: 18px; }
+  }
+  @media (max-width: 760px) {
+    .wrap { padding: 0 12px 16px; }
+    .seg button { font-size: 17px; }
+    .presets { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Sign in -->
+<div id="login" class="screen hidden">
+  <form class="card" id="loginForm" autocomplete="on">
+    <img src="__BASE__/static/logo_solid.webp" alt="">
+    <div>
+      <h1>EB Tools</h1>
+      <p class="muted">Sign in with your Delego account to run your committee's floor.</p>
+    </div>
+    <label>Email <input class="field" type="email" id="email" name="username" autocomplete="username" required></label>
+    <label>Password <input class="field" type="password" id="password" name="password" autocomplete="current-password" required></label>
+    <div class="err" id="loginErr" role="alert"></div>
+    <button class="btn-white" id="loginBtn" type="submit">Sign in</button>
+  </form>
+</div>
+
+<!-- Committee picker -->
+<div id="picker" class="screen hidden">
+  <div class="card" style="width:min(640px,100%)">
+    <div>
+      <h1>Choose your committee</h1>
+      <p class="muted">Signed in as <span id="pickerUser"></span></p>
+    </div>
+    <div class="choices" id="choices"></div>
+    <div class="err" id="pickerErr" role="alert"></div>
+    <div><button class="btn-line" id="pickerSignOut" type="button">Sign out</button></div>
+  </div>
+</div>
+
+<!-- EB Tools -->
+<div id="app" class="hidden">
+  <div class="wrap">
+    <div class="topbar">
+      <button class="iconbtn" id="back" type="button" title="Change committee" aria-label="Change committee">
+        <svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg>
+      </button>
+      <div class="title"><h1 id="cname"></h1><span class="dot off" id="conn" title="Connecting…"></span></div>
+      <div class="topmenu">
+        <button class="iconbtn more" id="topMore" type="button" aria-label="More">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></svg>
+        </button>
+        <div class="menu hidden" id="topMenu">
+          <button type="button" id="mChange">Change committee</button>
+          <button type="button" id="mOut" class="bad">Sign out <span class="muted" id="whoami" style="font-size:13px"></span></button>
+        </div>
+      </div>
+    </div>
+    <div class="connnote hidden" id="connNote">Reconnecting… changes are paused until the link is back.</div>
+
+    <nav class="tabs" role="tablist" aria-label="What this laptop shows">
+      <button type="button" data-tab="gsl" role="tab">GSL<span class="run hidden"></span></button>
+      <button type="button" data-tab="mod" role="tab">Mod<span class="run hidden"></span></button>
+      <button type="button" data-tab="unmod" role="tab">Timer<span class="run hidden"></span></button>
+    </nav>
+
+    <div class="displayrow">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="13" rx="1.5"/><path d="M9 21h6M12 17v4"/></svg>
+      <span class="boardlbl">On the board</span>
+      <div class="seg" id="displaySeg" role="group" aria-label="What the smartboard shows">
+        <button type="button" data-view="gsl">GSL</button>
+        <button type="button" data-view="mod">Mod</button>
+        <button type="button" data-view="unmod">Unmod</button>
+      </div>
+    </div>
+
+    <main class="cols">
+    <section class="col gsl" id="panel-gsl"></section>
+    <section class="col mod hidden" id="panel-mod"></section>
+
+    <section class="col unmod hidden" id="panel-unmod">
+      <div class="unmodcard">
+        <div class="lbl">UNMODERATED CAUCUS</div>
+        <div class="bigclock idle" id="uClock">00:00</div>
+        <div class="state" id="uState">PICK A LENGTH BELOW</div>
+        <div class="track"><div id="uBar"></div></div>
+      </div>
+      <div class="unmodbtns hidden" id="uBtns">
+        <button type="button" class="btn-line" id="uEnd">End</button>
+        <button type="button" class="btn-white" id="uToggle">Pause</button>
+      </div>
+      <div class="startunmod">
+        <h2>Start an unmod</h2>
+        <p>The smartboard switches to a full-screen countdown.</p>
+        <div class="presets" id="presets">
+          <button type="button" data-s="300">05:00</button>
+          <button type="button" data-s="600">10:00</button>
+          <button type="button" data-s="900">15:00</button>
+          <button type="button" data-s="1200">20:00</button>
+        </div>
+        <button type="button" class="custom" id="customUnmod">
+          <svg viewBox="0 0 24 24"><path d="M3 17.3V21h3.7l11-11-3.7-3.7-11 11Zm17.7-10.1a1 1 0 0 0 0-1.4l-2.5-2.5a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.7 2-1.6Z"/></svg>
+          Custom
+        </button>
+      </div>
+      <p class="hint"><kbd>Space</kbd> pauses and resumes whichever timer is running · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs</p>
+    </section>
+    </main>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <h3 id="dlgTitle"></h3>
+    <div class="msg" id="dlgMsg"></div>
+    <div id="dlgBody"></div>
+    <div class="btns">
+      <button type="button" id="dlgCancel">Cancel</button>
+      <button type="submit" id="dlgOk">OK</button>
+    </div>
+  </form>
+</dialog>
+<div id="toasts" aria-live="polite"></div>
+
+<script src="__BASE__/static/ebtools_portfolios.js"></script>
+<script>
+(() => {
+  "use strict";
+  // The path prefix of every request (see the comment at the top); "" when served directly.
+  const BASE = "__BASE__";
+  const FLAG_BASE = "https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/4x3/";
+  const PERSON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5Z"/></svg>';
+  const LIST_LABELS = { gsl: "General Speakers’ List", mod: "Moderated Caucus" };
+  const ICONS = {
+    search: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8"/></svg>',
+    more: '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></svg>',
+    x: '<svg viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19"/></svg>',
+    grip: '<svg viewBox="0 0 24 24"><path d="M4 9h16M4 15h16"/></svg>',
+    stopwatch: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4M9.5 2.5h5"/></svg>',
+    reset: '<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4.5H9"/></svg>',
+    next: '<svg viewBox="0 0 24 24"><path d="M6 5.5v13l9-6.5-9-6.5Z"/><rect x="16.5" y="5.5" width="2.6" height="13" rx="1"/></svg>',
+    play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5-12-7.5Z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1"/><rect x="14" y="4.5" width="4" height="15" rx="1"/></svg>',
+  };
+  const REQUEST_TIMEOUT = 12000;   // an op or a read waits this long for the server
+  const STALE_MS = 45000;          // the server sends the state at least every 20 s
+  const KEY_TOKEN = "ebtoolsToken";
+  const KEY_COMMITTEE = "ebtoolsCommittee";
+
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+  };
+  function setChildren(el, kids) { el.textContent = ""; kids.forEach((k) => el.appendChild(k)); }
+  function h(tag, props, ...kids) {
+    const el = document.createElement(tag);
+    if (props) for (const k in props) {
+      if (k === "class") el.className = props[k];
+      else if (k === "text") el.textContent = props[k];
+      else if (k === "icon") el.innerHTML = ICONS[props[k]]; // a constant, never user data
+      else if (k.startsWith("on")) el.addEventListener(k.slice(2), props[k]);
+      else if (props[k] === true) el.setAttribute(k, "");
+      else if (props[k] !== false && props[k] != null) el.setAttribute(k, props[k]);
+    }
+    kids.forEach((kid) => { if (kid != null) el.append(kid); });
+    return el;
+  }
+
+  // ---------- state ----------
+  let token = store.get(KEY_TOKEN);
+  let me = null;
+  let committees = [];
+  let committeeId = null;
+  let pool = [];          // what the search offers: the committee's matrix, else every country
+  let hasMatrix = false;
+  let matrixFailed = false;
+  let state = null;       // the floor
+  let offset = 0;         // server clock minus ours, in ms
+  let ws = null, retry = 0, retryTimer = null, session = 0;
+  let live = false, lastFrameAt = 0, connectAt = 0;
+  let dragging = false, pendingRender = false;
+  const busy = new Set(); // controls with an op in flight, so a double click can't send it twice
+
+  // ---------- what this laptop shows ----------
+  // The tabs are this laptop's alone (remembered here): switching them never touches the board
+  // or the other EB. The smartboard is switched with its own bar (see "what the smartboard shows").
+  const KEY_VIEW = "ebtoolsView";
+  let view = store.get(KEY_VIEW) || "gsl";
+  function showView(v) {
+    if (!["gsl", "mod", "unmod"].includes(v)) v = "gsl";
+    view = v;
+    store.set(KEY_VIEW, v);
+    ["gsl", "mod", "unmod"].forEach((n) => $("panel-" + n).classList.toggle("hidden", n !== v));
+    document.querySelectorAll(".tabs button").forEach((b) => {
+      const on = b.dataset.tab === v;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    closeMenus();
+  }
+  document.querySelector(".tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-tab]");
+    if (b) showView(b.dataset.tab);
+  });
+
+  // ---------- screens ----------
+  function show(which) {
+    $("login").classList.toggle("hidden", which !== "login");
+    $("picker").classList.toggle("hidden", which !== "picker");
+    $("app").classList.toggle("hidden", which !== "app");
+  }
+
+  function toast(message, { bad = false, action, onAction } = {}) {
+    const el = h("div", { class: "toast" + (bad ? " bad" : "") }, h("span", { text: message }));
+    const remove = () => el.remove();
+    if (action) el.append(h("button", { text: action, onclick: () => { remove(); onAction && onAction(); } }));
+    $("toasts").append(el);
+    setTimeout(remove, action ? 8000 : 4500);
+  }
+
+  // ---------- menus ----------
+  function closeMenus() { document.querySelectorAll(".menu").forEach((m) => m.classList.add("hidden")); }
+  function toggleMenu(menu) {
+    const open = menu.classList.contains("hidden");
+    closeMenus();
+    if (open) menu.classList.remove("hidden");
+  }
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu, .more")) closeMenus(); });
+  $("topMore").addEventListener("click", () => toggleMenu($("topMenu")));
+
+  // ---------- dialogs ----------
+  const dlg = $("dlg");
+  function openDialog({ title, message = "", body = null, action = "OK" }) {
+    return new Promise((resolve) => {
+      $("dlgTitle").textContent = title;
+      $("dlgMsg").textContent = message;
+      setChildren($("dlgBody"), body ? [body] : []);
+      $("dlgOk").textContent = action;
+      let ok = false;
+      const done = () => { dlg.removeEventListener("close", done); resolve(ok); };
+      $("dlgForm").onsubmit = () => { ok = true; };
+      $("dlgCancel").onclick = () => dlg.close();
+      dlg.addEventListener("close", done);
+      dlg.showModal();
+      $("dlgOk").focus();
+    });
+  }
+  const confirmDialog = (title, message, action) => openDialog({ title, message, action });
+
+  // A minutes + seconds picker; resolves to seconds, or null if cancelled.
+  async function askDuration(title, initialSeconds) {
+    const mins = h("input", { class: "field", type: "number", min: 0, max: 99, value: Math.floor(initialSeconds / 60), "aria-label": "Minutes" });
+    const secs = h("input", { class: "field", type: "number", min: 0, max: 59, value: initialSeconds % 60, "aria-label": "Seconds" });
+    const body = h("div", { class: "dur" }, mins, h("span", { text: "min" }), secs, h("span", { text: "sec" }));
+    for (;;) {
+      const ok = await openDialog({ title, message: "From 0:05 to 99:59.", body, action: "Set" });
+      if (!ok) return null;
+      const total = (Number(mins.value) || 0) * 60 + (Number(secs.value) || 0);
+      if (total >= 5 && total <= 5999) return total;
+      toast("Pick a time between 0:05 and 99:59.", { bad: true });
+    }
+  }
+
+  // ---------- API ----------
+  async function api(path, options = {}) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), options.timeout || REQUEST_TIMEOUT);
+    const headers = Object.assign({}, options.headers);
+    if (token && !options.anonymous) headers.Authorization = "Bearer " + token;
+    try {
+      return await fetch(BASE + path, Object.assign({}, options, { headers, signal: ctl.signal }));
+    } finally { clearTimeout(timer); }
+  }
+
+  async function detailOf(res) {
+    try {
+      const j = await res.json();
+      return typeof j.detail === "string" ? j.detail : null;
+    } catch (e) { return null; }
+  }
+
+  function signOut(message) {
+    token = null; me = null;
+    store.del(KEY_TOKEN);
+    closeSocket();
+    state = null; committeeId = null;
+    $("loginErr").textContent = message || "";
+    $("password").value = "";
+    show("login");
+    $("email").focus();
+  }
+
+  // ---------- sign in ----------
+  $("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("loginBtn");
+    const email = $("email").value.trim();
+    const password = $("password").value.trim();
+    if (!email || !password) { $("loginErr").textContent = "Fill in both fields."; return; }
+    btn.disabled = true; $("loginErr").textContent = "";
+    try {
+      const res = await api("/login", {
+        method: "POST", anonymous: true,
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body: new URLSearchParams({ username: email, password }),
+      });
+      if (res.status === 200) {
+        token = (await res.json()).access_token;
+        store.set(KEY_TOKEN, token);
+        await afterSignIn();
+      } else if (res.status === 403) {
+        $("loginErr").textContent = "Verify your email first: open the Delego app and enter the code we emailed you.";
+      } else if (res.status === 429) {
+        $("loginErr").textContent = "Too many attempts. Wait a minute and try again.";
+      } else if (res.status === 401) {
+        $("loginErr").textContent = "Wrong email or password.";
+      } else {
+        $("loginErr").textContent = (await detailOf(res)) || "Could not sign in. Try again.";
+      }
+    } catch (err) {
+      $("loginErr").textContent = "Cannot reach the server. Check your connection.";
+    } finally { btn.disabled = false; }
+  });
+
+  // Who is this, and may they run a floor? (the same `eb.tools` permission that gates the app screen)
+  async function afterSignIn() {
+    let res;
+    try { res = await api("/delegates/me"); }
+    catch (e) { signOut("Cannot reach the server. Check your connection."); return; }
+    if (res.status === 401) { signOut("Please sign in."); return; }
+    if (!res.ok) { signOut("Could not load your account."); return; }
+    me = await res.json();
+    if (!(me.permissions || []).includes("eb.tools")) {
+      signOut("This account doesn't have EB access. Ask the Secretariat to make you an EB member.");
+      return;
+    }
+    $("whoami").textContent = me.email;
+    $("pickerUser").textContent = me.email;
+    await loadCommittees();
+  }
+
+  $("mOut").addEventListener("click", () => signOut());
+  $("pickerSignOut").addEventListener("click", () => signOut());
+
+  // ---------- committees ----------
+  async function loadCommittees() {
+    try {
+      const res = await api("/public/committees", { anonymous: true });
+      committees = await res.json();
+    } catch (e) {
+      show("picker");
+      $("pickerErr").textContent = "Could not load committees. Retrying…";
+      setTimeout(loadCommittees, 4000);
+      return;
+    }
+    $("pickerErr").textContent = "";
+    setChildren($("choices"), committees.map((c) =>
+      h("button", { type: "button", class: "btn-line", text: c.name, onclick: () => openCommittee(c.id) })));
+    const fromUrl = new URLSearchParams(location.search).get("committee");
+    const wanted = Number(fromUrl || store.get(KEY_COMMITTEE));
+    if (committees.some((c) => c.id === wanted)) openCommittee(wanted);
+    else show("picker");
+  }
+
+  const toPicker = () => { closeMenus(); closeSocket(); show("picker"); };
+  $("back").addEventListener("click", toPicker);
+  $("mChange").addEventListener("click", toPicker);
+
+  function openCommittee(id) {
+    const c = committees.find((x) => x.id === id);
+    if (!c) { show("picker"); return; }
+    committeeId = id;
+    store.set(KEY_COMMITTEE, String(id));
+    const url = new URL(location.href);
+    url.searchParams.set("committee", id);
+    history.replaceState(null, "", url);
+    $("cname").textContent = c.name;
+    document.title = c.name + " · EB Tools";
+    state = null;
+    buildPanels();
+    showView(view);
+    render();
+    show("app");
+    loadMatrix(id);
+    connect();
+  }
+
+  // ---------- portfolio search (the same ranking as the app's EB Tools) ----------
+  const ACCENTS = { "á":"a","à":"a","â":"a","ä":"a","ã":"a","å":"a","é":"e","è":"e","ê":"e","ë":"e","í":"i","ì":"i","î":"i","ï":"i","ó":"o","ò":"o","ô":"o","ö":"o","õ":"o","ú":"u","ù":"u","û":"u","ü":"u","ç":"c","ñ":"n" };
+  function foldName(s) {
+    let out = "";
+    for (const ch of s.toLowerCase()) {
+      if (ch === "'" || ch === "’" || ch === ".") continue;
+      out += ch === "-" ? " " : (ACCENTS[ch] || ch);
+    }
+    return out.split(/\s+/).filter(Boolean).join(" ");
+  }
+  const allCountries = (window.EB_PORTFOLIOS || []).map(([name, code, aliases]) => ({ name, code, aliases, tag: null, detail: null }));
+
+  function rankOf(name, q, alias) {
+    if (name === q) return 0;
+    const base = alias ? 3 : 1;
+    if (name.startsWith(q)) return base;
+    if (name.split(" ").some((w) => w.startsWith(q))) return base + 1;
+    if (name.includes(q)) return 5;
+    const squashed = q.replace(/ /g, "");
+    if (squashed.length >= 3 && name.replace(/ /g, "").includes(squashed)) return 6;
+    return null;
+  }
+
+  // Best first: an exact name or alias, then names starting with it, then a word of a name,
+  // then aliases ("usa", "uk"), then anything containing it. Ones already on the list stay in
+  // place but are marked.
+  function search(query, taken, limit = 8) {
+    const q = foldName(query);
+    if (!q) return [];
+    const takenSet = new Set(taken.map(foldName));
+    const scored = [];
+    pool.forEach((p, i) => {
+      let best = rankOf(foldName(p.name), q, false);
+      for (const a of p.aliases) {
+        const r = rankOf(foldName(a), q, true);
+        if (r != null && (best == null || r < best)) best = r;
+      }
+      if (best != null) scored.push({ rank: best, i, p });
+    });
+    scored.sort((a, b) => a.rank - b.rank || a.i - b.i);
+    return scored.slice(0, limit).map((s) => ({ p: s.p, rank: s.rank, onList: takenSet.has(foldName(s.p.name)) }));
+  }
+
+  // A committee's matrix answers to the names its countries are also known by ("usa" finds
+  // "United States of America"), and a PSC member to their party.
+  async function loadMatrix(id) {
+    matrixFailed = false; hasMatrix = false; pool = allCountries;
+    let json = null;
+    try {
+      const res = await api("/public/committees/" + id + "/portfolios", { anonymous: true });
+      if (res.ok) json = await res.json();
+    } catch (e) {}
+    if (id !== committeeId) return;
+    if (json === null) {
+      matrixFailed = true;
+      toast("Couldn't load this committee's portfolio list: showing all countries.", { bad: true });
+      return;
+    }
+    if (json.length) {
+      const byCode = new Map(allCountries.map((c) => [c.code, c]));
+      pool = json.map((j) => {
+        const known = j.code ? byCode.get(j.code) : null;
+        const aliases = new Set([].concat(known ? [known.name, ...known.aliases] : [], j.tag ? [j.tag] : [], j.detail ? [j.detail] : []));
+        aliases.delete(j.name);
+        return { name: j.name, code: j.code || null, aliases: [...aliases], tag: j.tag || null, detail: j.detail || null };
+      });
+      hasMatrix = true;
+    }
+  }
+
+  // ---------- live connection (same logic as the smartboard) ----------
+  function closeSocket() {
+    session++;
+    clearTimeout(retryTimer);
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    setConn(false);
+  }
+
+  function applyFrame(frame, mine) {
+    if (mine !== session || !frame || frame.type !== "state") return;
+    offset = frame.server_now - Date.now();
+    if (state && frame.state.version < state.version) return;
+    const changed = !state || frame.state.version !== state.version;
+    state = frame.state;
+    if (changed) render();
+  }
+
+  async function refresh(mine) {
+    try {
+      const res = await api("/committees/" + committeeId + "/floor", { anonymous: true, cache: "no-store" });
+      if (res.status === 404) { toast("That committee no longer exists.", { bad: true }); toPicker(); return; }
+      if (!res.ok) return;
+      const frame = await res.json();
+      const behind = live && state && frame.state.version > state.version;
+      applyFrame(frame, mine);
+      const stuck = !live && performance.now() - connectAt > 10000;
+      if ((behind || stuck) && mine === session) connect();
+    } catch (e) {}
+  }
+
+  const onConsole = () => committeeId != null && !$("app").classList.contains("hidden");
+  let ticks = 0;
+  setInterval(() => {
+    if (!onConsole()) return;
+    ticks++;
+    if (!live || ticks % 6 === 0) refresh(session);
+  }, 10000);
+  setInterval(() => {
+    if (onConsole() && performance.now() - lastFrameAt > STALE_MS) connect();
+  }, 5000);
+
+  function connect() {
+    const mine = ++session;
+    clearTimeout(retryTimer);
+    if (ws) { ws.onclose = null; ws.close(); }
+    setConn(false);
+    lastFrameAt = connectAt = performance.now();
+    refresh(mine);
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(proto + "//" + location.host + BASE + "/ws/committees/" + committeeId + "/floor");
+    ws.onmessage = (event) => {
+      if (mine !== session) return;
+      let frame;
+      try { frame = JSON.parse(event.data); } catch (e) { return; }
+      if (!frame || frame.type !== "state") return;
+      retry = 0; lastFrameAt = performance.now();
+      setConn(true);
+      applyFrame(frame, mine);
+    };
+    ws.onclose = (event) => {
+      if (mine !== session) return;
+      setConn(false);
+      if (event.code === 4404) { toPicker(); return; }
+      retryTimer = setTimeout(connect, Math.min(16000, 1000 * 2 ** retry++));
+    };
+  }
+
+  function setConn(isLive) {
+    const was = live;
+    live = isLive;
+    const el = $("conn");
+    el.classList.toggle("off", !isLive);
+    el.title = isLive ? "Live" : "Reconnecting…";
+    $("connNote").classList.toggle("hidden", isLive || !state);
+    if (isLive && !was && matrixFailed && committeeId != null) loadMatrix(committeeId);
+  }
+
+  // ---------- sending ops ----------
+  // Resolves { ok, status, detail }. Never throws. `expected` is a 409 the caller handles
+  // itself (so no error toast for it).
+  async function sendOp(op, expected) {
+    if (!live) { toast("Reconnecting… try again in a moment.", { bad: true }); return { ok: false, status: 0 }; }
+    try {
+      const res = await api("/committees/" + committeeId + "/floor/ops", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(op),
+      });
+      if (res.status === 200) {
+        applyFrame(await res.json(), session);
+        return { ok: true, status: 200 };
+      }
+      if (res.status === 401) { signOut("Your session expired. Sign in again."); return { ok: false, status: 401 }; }
+      const detail = await detailOf(res);
+      if (res.status === 403) toast("Only the EB can change the floor.", { bad: true });
+      else if (res.status === 409) { if (detail !== expected) toast(detail || "That can't be done right now.", { bad: true }); }
+      else if (res.status === 503) toast("The server is busy. Try again.", { bad: true });
+      else if (res.status === 429) toast("Slow down a little: too many changes at once.", { bad: true });
+      else toast(detail || "That wasn't accepted.", { bad: true });
+      return { ok: false, status: res.status, detail };
+    } catch (e) {
+      toast("Couldn't reach the server. Check your connection.", { bad: true });
+      return { ok: false, status: 0 };
+    }
+  }
+
+  // Run a control's action unless the same control is already running it.
+  async function guarded(key, fn) {
+    if (busy.has(key)) return;
+    busy.add(key);
+    try { await fn(); }
+    finally { setTimeout(() => busy.delete(key), 250); }
+  }
+
+  // Starting a timer while another runs asks first, then retries with replace.
+  async function sendTimed(op) {
+    let res = await sendOp(Object.assign({}, op, { replace: false }), "Another timer is running");
+    if (res.status === 409 && res.detail === "Another timer is running") {
+      if (await confirmDialog("Another timer is running", "Stop it and start this one instead?", "Start this one")) {
+        res = await sendOp(Object.assign({}, op, { replace: true }));
+      }
+    }
+    return res;
+  }
+
+  // ---------- the GSL and Mod tabs ----------
+  const panels = {};
+
+  function buildPanels() {
+    ["gsl", "mod"].forEach((name) => {
+      const root = $("panel-" + name);
+      const input = h("input", {
+        type: "text", placeholder: "Add a portfolio", autocomplete: "off",
+        "aria-label": "Add to the " + LIST_LABELS[name], maxlength: 120,
+      });
+      const suggest = h("ul", { class: "suggest hidden", role: "listbox" });
+      const menu = h("div", { class: "menu hidden" },
+        h("button", { type: "button", text: "Speaking time…", onclick: () => { closeMenus(); setSpeakerTime(name); } }),
+        h("button", { type: "button", class: "bad", text: "Clear list", onclick: () => { closeMenus(); clearList(name); } }));
+      const moreBtn = h("button", { type: "button", class: "iconbtn more", "aria-label": "List options", icon: "more", onclick: () => toggleMenu(menu) });
+      const entries = h("ol", { class: "entries" });
+      const sheet = h("div", { class: "sheet" });
+      const count = h("span", { class: "count" });
+      setChildren(root, [
+        h("div", { class: "colhead" }, h("h2", { text: name === "gsl" ? "GSL" : "Moderated Caucus" }), count),
+        h("div", { class: "searchrow" }, h("label", { class: "search" }, h("span", { icon: "search" }), input), moreBtn, suggest, menu),
+        entries, sheet,
+      ]);
+      const p = { name, root, count, input, suggest, entries, sheet, options: [], active: -1, suppress: false };
+      buildSheet(p);
+      panels[name] = p;
+      wireSearch(p);
+    });
+  }
+
+  // The sheet at the bottom: who is up, the clock, and Reset / Start / Next.
+  function buildSheet(p) {
+    p.lbl = h("span", { class: "lbl" });
+    p.eachText = h("span");
+    p.each = h("button", { type: "button", class: "each", title: "Speaking time", onclick: () => setSpeakerTime(p.name) }, h("span", { icon: "stopwatch" }), p.eachText);
+    p.speaker = h("div", { class: "speaker" });
+    p.clock = h("div", { class: "bigclock idle", text: "00:00" });
+    p.bar = h("div");
+    p.reset = h("button", { type: "button", class: "circle", title: "Reset the timer", "aria-label": "Reset the timer", icon: "reset",
+      onclick: () => guarded("reset", () => sendOp({ op: "reset" })) });
+    p.play = h("button", { type: "button", class: "play", onclick: () => playPressed(p.name) });
+    p.next = h("button", { type: "button", class: "circle next", title: "Next speaker", "aria-label": "Next speaker", icon: "next",
+      onclick: () => { const cur = state && currentSpeaker(p.name); if (cur) nextSpeaker(p.name, cur); } });
+    setChildren(p.sheet, [
+      h("div", { class: "top" }, p.lbl, p.each),
+      p.speaker, p.clock, h("div", { class: "track" }, p.bar),
+      h("div", { class: "controls" }, p.reset, p.play, p.next),
+    ]);
+  }
+
+  function listEntries(name) { return state ? state.lists[name].entries : []; }
+
+  // ----- search box -----
+  const typed = (text) => text.trim().split(/\s+/).filter(Boolean).join(" ");
+  const nameFits = (s) => [...s].length <= 80;
+
+  function optionsFor(p) {
+    const text = typed(p.input.value);
+    const entries = listEntries(p.name);
+    if (!text) {
+      if (!hasMatrix) return [];
+      const taken = new Set(entries.map((e) => foldName(e.name)));
+      return pool.filter((x) => !taken.has(foldName(x.name))).map((x) => ({ p: x, rank: 9, onList: false }));
+    }
+    const opts = search(text, entries.map((e) => e.name), hasMatrix ? 12 : 8);
+    // Always offered, even when a portfolio matches: a person can be called Jordan, and a
+    // matrix committee may need someone off the sheet.
+    if (nameFits(text)) opts.push({ person: text, onList: false });
+    return opts;
+  }
+
+  function renderSuggest(p) {
+    p.options = optionsFor(p);
+    // After an add the list stays closed (it would cover the speakers) until they click, type or press ↓.
+    if (!p.options.length || document.activeElement !== p.input || (p.suppress && !typed(p.input.value))) {
+      p.suggest.classList.add("hidden"); return;
+    }
+    p.active = Math.min(p.active, p.options.length - 1);
+    setChildren(p.suggest, p.options.map((o, i) => {
+      const nm = o.person != null ? (hasMatrix ? "Add other: “" + o.person + "”" : "Add “" + o.person + "” as a person") : o.p.name;
+      const sub = o.person != null ? "" : (o.onList ? "already on the list" : (o.p.detail || ""));
+      const li = h("li", { role: "option", class: (i === p.active ? "active" : "") + (o.onList ? " taken" : "") },
+        flagEl(o.person != null ? null : o.p.code, o.person != null ? null : o.p.tag),
+        h("span", { text: nm }), h("span", { class: "sub", text: sub }));
+      // mousedown, not click: the input must not lose focus (and close this list) first.
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); addOption(p, o); });
+      return li;
+    }));
+    p.suggest.classList.remove("hidden");
+    const act = p.suggest.children[p.active];
+    if (act) act.scrollIntoView({ block: "nearest" });
+  }
+
+  function wireSearch(p) {
+    p.input.addEventListener("input", () => { p.suppress = false; p.active = -1; renderSuggest(p); });
+    p.input.addEventListener("click", () => { p.suppress = false; renderSuggest(p); });
+    p.input.addEventListener("focus", () => renderSuggest(p));
+    p.input.addEventListener("blur", () => p.suggest.classList.add("hidden"));
+    p.input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); p.suppress = false; p.active = Math.min(p.options.length - 1, p.active + 1); renderSuggest(p); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); p.active = Math.max(-1, p.active - 1); renderSuggest(p); }
+      else if (e.key === "Escape") { p.input.blur(); }
+      else if (e.key === "Enter") { e.preventDefault(); submitSearch(p); }
+    });
+  }
+
+  // Enter adds only when it's clear what was meant: a highlighted suggestion, an exact name or
+  // alias ("usa"), or the one portfolio whose name (or a word of it) starts with what was typed
+  // ("fra"). With several ("kor": both Koreas) the suggestions stay open for a pick; with none,
+  // off a matrix, it's a person. It never falls through to a different country.
+  function submitSearch(p) {
+    const text = typed(p.input.value);
+    if (!text) return;
+    if (p.active >= 0 && p.options[p.active]) { addOption(p, p.options[p.active]); return; }
+    const matches = search(text, listEntries(p.name).map((e) => e.name), 8);
+    const top = matches[0];
+    if (top && top.rank === 0) { addOption(p, top); return; }
+    const strong = matches.filter((m) => m.rank <= 4);
+    if (strong.length === 1) addOption(p, strong[0]);
+    else if (!matches.length && !hasMatrix) {
+      if (nameFits(text)) addOption(p, { person: text });
+      else toast("Names can be at most 80 characters.", { bad: true });
+    } else if (!matches.length && hasMatrix) {
+      toast("Not on this committee's list. Pick “Add other” to add them anyway.");
+    }
+  }
+
+  async function addOption(p, o) {
+    const name = o.person != null ? o.person : o.p.name;
+    if (o.onList) { toast(name + " is already on the list."); return; }
+    p.input.value = ""; p.active = -1; p.suppress = true;
+    p.input.focus();
+    renderSuggest(p);
+    await guarded("add:" + p.name + ":" + name, () =>
+      sendOp({ op: "add", list: p.name, name, code: o.person != null ? null : o.p.code }));
+  }
+
+  // ----- list actions -----
+  async function removeEntry(name, entry, index) {
+    await guarded("remove:" + entry.id, async () => {
+      const res = await sendOp({ op: "remove", list: name, entry_id: entry.id });
+      if (!res.ok) return;
+      toast("Removed " + entry.name, { action: "Undo", onAction: () => restoreEntry(name, entry, index) });
+    });
+  }
+
+  async function restoreEntry(name, entry, index) {
+    const res = await sendOp({ op: "add", list: name, name: entry.name, code: entry.code });
+    if (!res.ok) return;
+    const list = listEntries(name);
+    const added = list[list.length - 1];
+    if (added) await sendOp({ op: "move", list: name, entry_id: added.id, to_index: index });
+  }
+
+  function moveEntry(name, entry, toIndex) {
+    return guarded("move:" + entry.id, () => sendOp({ op: "move", list: name, entry_id: entry.id, to_index: toIndex }));
+  }
+
+  async function clearList(name) {
+    if (!listEntries(name).length) { toast("The list is already empty."); return; }
+    if (await confirmDialog("Clear the " + LIST_LABELS[name] + "?", "Everyone on it is removed.", "Clear")) {
+      await guarded("clear:" + name, () => sendOp({ op: "clear", list: name }));
+    }
+  }
+
+  async function setSpeakerTime(name) {
+    const secs = await askDuration("Speaking time", state ? state.lists[name].speaker_seconds : 90);
+    if (secs != null) await sendOp({ op: "set_speaker_time", list: name, seconds: secs });
+  }
+
+  // The white button: Start the current speaker, or Pause / Resume their timer.
+  function playPressed(name) {
+    const t = state && state.timer;
+    if (!t) return;
+    if (timingList(name)) return guarded("toggle", () => sendOp({ op: t.running ? "pause" : "resume" }));
+    return guarded("start:" + name, () => sendTimed({ op: "start_speaker", list: name }));
+  }
+
+  async function nextSpeaker(name, speaker) {
+    await guarded("next:" + name, async () => {
+      if (!(await confirmDialog("End " + speaker.name + "’s speech?", "They come off the list and the timer resets.", "Next speaker"))) return;
+      const res = await sendOp({ op: "next", list: name, entry_id: speaker.id });
+      if (res.status === 409) refresh(session); // already gone: show what the floor really is
+    });
+  }
+
+  // ---------- rendering ----------
+  function flagEl(code, tag) {
+    if (!code && tag) return h("span", { class: "tagb", text: tag });
+    if (!code) { const p = h("span", { class: "person" }); p.innerHTML = PERSON_SVG; return p; } // a constant, never user data
+    const img = h("img", { class: "flag", alt: "", src: FLAG_BASE + encodeURIComponent(code) + ".svg" });
+    img.onerror = () => img.replaceWith(flagEl(null, null));
+    return img;
+  }
+
+  function currentSpeaker(name) {
+    const entries = listEntries(name);
+    const t = state.timer;
+    if (t.kind === "speaker" && t.list === name) {
+      const timed = entries.find((e) => e.id === t.speaker_id);
+      if (timed) return timed;
+    }
+    return entries[0] || null;
+  }
+
+  // "01:30"; below zero "-00:12" (overtime), capped at 99:59 either way.
+  const fmtClock = (ms) => {
+    const s = Math.ceil(ms / 1000);
+    const a = Math.min(Math.abs(s), 5999);
+    return (s < 0 ? "-" : "") + String(Math.floor(a / 60)).padStart(2, "0") + ":" + String(a % 60).padStart(2, "0");
+  };
+  // Running or paused, overtime included: only Reset or Next ends a timer.
+  const timerActive = (t) => t.kind !== "idle";
+  // Time left on an active timer; below zero in overtime.
+  const leftMs = (t) => (t.running ? t.ends_at - (Date.now() + offset) : t.remaining_ms);
+  // This list's speaker timer is running or paused (not finished).
+  const timingList = (name) => {
+    const t = state.timer;
+    return t.kind === "speaker" && t.list === name && timerActive(t);
+  };
+
+  function render() {
+    if (dragging) { pendingRender = true; return; }
+    if (!state) {
+      ["gsl", "mod"].forEach((n) => { const p = panels[n]; if (p) setChildren(p.entries, [h("li", { class: "empty", text: "Loading…" })]); });
+      return;
+    }
+    // The board switch lights what the board shows (whoever switched it).
+    $("displaySeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.view === state.display));
+    const t = state.timer;
+    document.querySelectorAll(".tabs button").forEach((b) => {
+      const n = b.dataset.tab;
+      const runs = t.running && (n === "unmod" ? t.kind === "unmod" : t.kind === "speaker" && t.list === n);
+      b.querySelector(".run").classList.toggle("hidden", !runs);
+    });
+    ["gsl", "mod"].forEach(renderList);
+    renderUnmod();
+    ["gsl", "mod"].forEach((n) => { if (panels[n]) renderSuggest(panels[n]); });
+    lastClocks = {};
+    tick();
+  }
+
+  function renderList(name) {
+    const p = panels[name];
+    const list = state.lists[name];
+    const entries = list.entries;
+    const t = state.timer;
+    const cur = currentSpeaker(name);
+    const timing = timingList(name);
+    p.count.textContent = entries.length + " speaker" + (entries.length === 1 ? "" : "s");
+
+    if (!entries.length) {
+      setChildren(p.entries, [h("li", { class: "empty" }, "No speakers yet.", h("br"), "Add portfolios above, in the order they will speak.")]);
+    } else {
+      setChildren(p.entries, entries.map((e, i) => {
+        const isCur = cur && e.id === cur.id;
+        const li = h("li", { class: isCur ? "cur" : "", draggable: "true", "data-id": e.id },
+          h("span", { class: "num", text: String(i + 1) }),
+          flagEl(e.code, e.tag),
+          h("span", { class: "namebox" },
+            h("span", { class: "nm", text: e.name, title: e.name }),
+            isCur ? h("span", { class: "tagline", text: timing && e.id === t.speaker_id ? "Speaking" : "Up next" }) : null),
+          h("button", { class: "rowbtn", type: "button", title: "Remove", "aria-label": "Remove " + e.name, icon: "x", onclick: () => removeEntry(name, e, i) }),
+          h("span", { class: "rowbtn grip", title: "Drag to reorder", "aria-hidden": "true", icon: "grip" }));
+        wireDrag(li, name, e, i);
+        return li;
+      }));
+    }
+
+    // The sheet.
+    p.eachText.textContent = fmtClock(list.speaker_seconds * 1000) + " each";
+    if (!cur) {
+      p.lblBase = "LIST EMPTY";
+      setChildren(p.speaker, [h("span", { class: "who", text: "Add speakers to start" })]);
+    } else {
+      p.lblBase = timing ? "NOW SPEAKING" : "UP NEXT";
+      setChildren(p.speaker, [flagEl(cur.code, cur.tag), h("span", { class: "who", text: cur.name, title: cur.name })]);
+    }
+    p.lbl.textContent = p.lblBase;
+    p.lbl.classList.remove("overtag"); // tick() puts OVERTIME back if it still is
+    const playing = timing && t.running;
+    p.play.disabled = !cur;
+    setChildren(p.play, [h("span", { icon: playing ? "pause" : "play" }), h("span", { text: playing ? "Pause" : (timing ? "Resume" : "Start") })]);
+    p.reset.disabled = !timing;
+    p.next.disabled = !cur;
+  }
+
+  // Drag to reorder: the entry ends up where it is dropped (to_index counts after it is taken out).
+  let dragId = null;
+  function wireDrag(li, name, entry, index) {
+    li.addEventListener("dragstart", (e) => {
+      dragging = true; dragId = entry.id;
+      li.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", entry.id);
+    });
+    li.addEventListener("dragend", () => {
+      dragging = false; dragId = null;
+      li.classList.remove("dragging");
+      document.querySelectorAll("li.over").forEach((x) => x.classList.remove("over"));
+      if (pendingRender) { pendingRender = false; render(); }
+    });
+    li.addEventListener("dragover", (e) => {
+      if (dragId == null || !li.parentElement.contains(document.querySelector('li[data-id="' + dragId + '"]'))) return;
+      e.preventDefault();
+      li.classList.add("over");
+    });
+    li.addEventListener("dragleave", () => li.classList.remove("over"));
+    li.addEventListener("drop", (e) => {
+      e.preventDefault();
+      li.classList.remove("over");
+      const moved = listEntries(name).find((x) => x.id === dragId);
+      if (moved && moved.id !== entry.id) moveEntry(name, moved, index);
+    });
+  }
+
+  function renderUnmod() {
+    const t = state.timer;
+    const unmod = t.kind === "unmod";
+    $("uBtns").classList.toggle("hidden", !unmod);
+    $("uToggle").textContent = t.running ? "Pause" : "Resume";
+    $("uToggle").disabled = !(unmod && timerActive(t));
+  }
+
+  // ---------- the clocks ----------
+  // What a view's clock shows: its own timer when it has one, else the idle time.
+  function clockFor(view) {
+    if (!state) return { ms: 0, total: 0, mode: "idle" };
+    const t = state.timer;
+    const mine = view === "unmod" ? t.kind === "unmod" : t.kind === "speaker" && t.list === view;
+    if (!mine) {
+      const secs = view === "unmod" ? 0 : state.lists[view].speaker_seconds;
+      return { ms: secs * 1000, total: 0, mode: "idle" };
+    }
+    const ms = leftMs(t);
+    return { ms, total: t.duration * 1000, mode: ms <= 0 ? "over" : (t.running ? "running" : "paused") };
+  }
+
+  let lastClocks = {};
+  function paint(key, clockEl, barEl, reading) {
+    const text = fmtClock(reading.ms);
+    if (lastClocks[key] !== text + reading.mode) {
+      lastClocks[key] = text + reading.mode;
+      clockEl.textContent = text;
+      clockEl.classList.toggle("idle", reading.mode === "idle" || reading.mode === "paused");
+      clockEl.classList.toggle("low", reading.mode === "running" && reading.ms <= 10000);
+      clockEl.classList.toggle("over", reading.mode === "over");
+    }
+    const used = reading.mode === "idle" || !reading.total ? 0 : Math.min(1, (reading.total - reading.ms) / reading.total);
+    barEl.style.width = 100 * used + "%";
+  }
+
+  function tick() {
+    ["gsl", "mod"].forEach((n) => {
+      const p = panels[n];
+      if (!p || !state) return;
+      const r = clockFor(n);
+      paint(n, p.clock, p.bar, r);
+      // Over time: the label says so (and how it reads), until Next or Reset.
+      const over = r.mode === "over";
+      if (p.lbl.classList.contains("overtag") !== over) {
+        p.lbl.classList.toggle("overtag", over);
+        p.lbl.textContent = over ? (state.timer.running ? "OVERTIME" : "OVERTIME · PAUSED") : p.lblBase;
+      }
+    });
+    const u = clockFor("unmod");
+    paint("unmod", $("uClock"), $("uBar"), u);
+    const uText = { paused: "PAUSED", over: state && !state.timer.running ? "OVERTIME · PAUSED" : "OVERTIME", running: "RUNNING", idle: "PICK A LENGTH BELOW" }[u.mode];
+    if ($("uState").textContent !== uText) $("uState").textContent = uText;
+    $("uState").classList.toggle("overtag", u.mode === "over");
+  }
+  setInterval(tick, 200);
+
+  // ---------- the Timer tab ----------
+  $("uEnd").addEventListener("click", () => guarded("reset", () => sendOp({ op: "reset" })));
+  $("uToggle").addEventListener("click", () => {
+    const t = state && state.timer;
+    if (t && t.kind === "unmod" && timerActive(t)) guarded("toggle", () => sendOp({ op: t.running ? "pause" : "resume" }));
+  });
+
+  async function startUnmod(seconds) {
+    await guarded("unmod", async () => {
+      const t = state && state.timer;
+      if (t && t.kind === "unmod" && leftMs(t) > 0 &&
+          !(await confirmDialog("Restart the unmod?", "The running unmod is replaced with " + fmtClock(seconds * 1000) + ".", "Restart"))) return;
+      await sendTimed({ op: "start_unmod", seconds });
+    });
+  }
+  $("presets").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-s]");
+    if (b) startUnmod(Number(b.dataset.s));
+  });
+  $("customUnmod").addEventListener("click", async () => {
+    const t = state && state.timer;
+    const secs = await askDuration("Unmod length", t && t.kind === "unmod" && t.duration > 0 ? t.duration : 600);
+    if (secs != null) startUnmod(secs);
+  });
+
+  // ---------- what the smartboard shows ----------
+  $("displaySeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-view]");
+    if (b && (!state || b.dataset.view !== state.display)) {
+      guarded("display:" + b.dataset.view, () => sendOp({ op: "set_display", view: b.dataset.view }));
+    }
+  });
+
+  // ---------- keyboard ----------
+  // Space pauses or resumes whichever timer is running; 1, 2, 3 switch this laptop's tabs.
+  function toggleTimer() {
+    if (!state || !timerActive(state.timer)) return;
+    return guarded("toggle", () => sendOp({ op: state.timer.running ? "pause" : "resume" }));
+  }
+  document.addEventListener("keydown", (e) => {
+    if ($("app").classList.contains("hidden") || dlg.open || e.metaKey || e.ctrlKey || e.altKey) return;
+    const tagName = (e.target.tagName || "").toLowerCase();
+    if (["input", "textarea", "select"].includes(tagName)) return;
+    if (e.key === "1" || e.key === "2" || e.key === "3") { showView(["gsl", "mod", "unmod"][Number(e.key) - 1]); return; }
+    if (e.key !== " " || e.repeat || tagName === "button" || tagName === "a") return;
+    e.preventDefault();
+    toggleTimer();
+  });
+
+  // ---------- start ----------
+  if (token) afterSignIn(); else { show("login"); $("email").focus(); }
+})();
+</script>
+</body>
+</html>
