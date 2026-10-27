@@ -1680,8 +1680,9 @@ async def reset_password(
 ###############################################
 
 ROOMS_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "rooms.json")
+FLOOR_PLANS_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "floor_plans.json")
 
-@lru_cache()
+
 def read_rooms_data():
     """Reads and parses the rooms data from the JSON file."""
     try:
@@ -1689,7 +1690,7 @@ def read_rooms_data():
         if not os.path.exists(ROOMS_FILE_PATH):
             return HTTPException(status_code=500, detail="Error reading rooms data: File does not exist")
         
-        with open(ROOMS_FILE_PATH, "r") as f:
+        with open(ROOMS_FILE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
             
     except json.JSONDecodeError:
@@ -1720,11 +1721,36 @@ def get_rooms():
     except Exception as e:
         # Catch any other unexpected errors
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
-    
-    
+
+
+def read_floor_plans_data():
+    """Reads and parses the floor plans layout data from data/floor_plans.json."""
+    try:
+        if not os.path.exists(FLOOR_PLANS_FILE_PATH):
+            return {"canvas_width": 1000, "canvas_height": 1000, "floors": []}
+        with open(FLOOR_PLANS_FILE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Error reading floor plans data: Invalid JSON format")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error while fetching floor plans data: {str(e)}")
+
+
+@app.get(
+    "/floor_plans",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_floor_plans():
+    """Returns the dynamic building floor plans from data/floor_plans.json."""
+    return read_floor_plans_data()
+
+
 SCHEDULE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "schedule.json")
 
-@lru_cache()
+
 def read_schedule_data():
     """Reads and parses the full schedule data from the JSON file."""
     try:
