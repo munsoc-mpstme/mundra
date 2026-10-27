@@ -88,7 +88,7 @@ APP_ROLE_PERMISSIONS = {
     # An OC member runs the event rather than attending it, so no guides or badge. They
     # ask for a break or say they are late; accepting or rejecting is for the Hospitality
     # team (a team member holding chat.post), not for the OC role.
-    "oc": frozenset({APP_EB_TOOLS, APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST}),
+    "oc": frozenset({APP_BADGE_VIEW, APP_EB_TOOLS, APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST}),
     "admin": frozenset(
         {
             APP_GUIDES_VIEW,

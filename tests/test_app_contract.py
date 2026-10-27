@@ -26,7 +26,7 @@ def make(**kwargs):
 EXPECTED = {
     "delegate": {"guides.view", "badge.view"},
     "eb": {"guides.view", "badge.view", "eb.tools"},
-    "oc": {"eb.tools", "food.scan", "chat.view", "chat.send_request"},
+    "oc": {"badge.view", "eb.tools", "food.scan", "chat.view", "chat.send_request"},
     "admin": {
         "guides.view", "badge.view", "eb.tools", "food.scan",
         "chat.view", "chat.send_request", "chat.respond", "admin.roles",
