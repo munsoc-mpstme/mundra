@@ -38,8 +38,8 @@
   {
     "id": "ecosoc_7",
     "committee_name": "ECOSOC",
-    "room_code": "CR 503",
-    "floor": "Floor 5"
+    "room_code": "CR 102",
+    "floor": "Floor 1"
   },
   {
     "id": "ipc_8",
@@ -50,7 +50,7 @@
   {
     "id": "disec_9",
     "committee_name": "DISEC",
-    "room_code": "TBA",
-    "floor": "TBA"
+    "room_code": "CR 103",
+    "floor": "Floor 1"
   }
 ]
