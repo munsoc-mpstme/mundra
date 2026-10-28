@@ -420,3 +420,79 @@ def test_name_search_treats_wildcards_literally(client):
     hospi = hospitality_member()
     res = client.get("/food/delegates", params={"q": "%%"}, headers=auth_header(hospi))
     assert res.status_code == 200 and res.json() == []
+
+
+# --- the admin's Food page (today's plates and who scanned them) ----------------------
+
+
+def test_food_today_counts_every_meal_by_diet_and_by_scanner():
+    """At the DB layer against its own event, so the counts are isolated."""
+    event = make_dated_event("Food Page Event")
+    riya, aman = make(), make()  # scanners with accounts
+    veg = make_mm(food_preference="veg")[1]
+    jain = make_mm(food_preference="jain")[1]
+    plain = make_mm()[1]
+
+    def scan(delegate_id, meal, by, diet=None, day=1):
+        asyncio.run(database.record_meal_scan(
+            event_id=event, day=day, meal=meal, delegate_id=delegate_id,
+            scanned_by=by, diet=diet,
+        ))
+
+    scan(veg, "lunch", riya, "veg")
+    scan(jain, "lunch", riya, "jain")
+    scan(plain, "lunch", aman, "veg")  # the scanner's pick, not the (empty) registration
+    scan(veg, "hitea", riya)  # no diet sent: the registered veg counts
+    scan(veg, "lunch", riya, "veg")  # a second lunch: refused, not counted
+    scan(jain, "lunch", "gone@x", "jain", day=2)  # another day: not counted
+    scan(jain, "hitea", "gone@x", "jain")  # a scanner with no account
+
+    today = date(2026, 10, 31)
+    page = asyncio.run(database.get_food_today(event, 1, today))
+    assert page.date == today
+    assert (page.total, page.veg, page.jain, page.non_veg, page.unspecified) == (5, 3, 2, 0, 0)
+    rows = [(s.email, s.count) for s in page.scanners]
+    assert rows == [(riya, 3), (aman, 1), ("gone@x", 1)]
+    assert page.scanners[0].name != riya  # a real name, not the email
+    assert page.scanners[2].name == "gone@x"
+
+    plates = asyncio.run(database.get_plates_scanned_by(event, 1, riya))
+    assert [(p.delegate_id, p.meal, p.diet) for p in plates] == [
+        (veg, "hitea", "veg"), (jain, "lunch", "jain"), (veg, "lunch", "veg"),
+    ]
+    assert all(p.name for p in plates)
+    assert asyncio.run(database.get_plates_scanned_by(event, 1, "nobody@x")) == []
+
+
+def test_an_empty_day_is_all_zeros():
+    event = make_dated_event("Quiet Event")
+    page = asyncio.run(database.get_food_today(event, 1, date(2026, 10, 30)))
+    assert (page.total, page.veg, page.jain, page.scanners) == (0, 0, 0, [])
+
+
+def test_the_food_page_is_for_admins_only(client, food_event):
+    _, delegate_id = make_mm(food_preference="veg")
+    hospi = hospitality_member()
+    client.post(
+        "/food/scans",
+        data={"delegate_id": delegate_id, "meal": "lunch", "diet": "veg"},
+        headers=auth_header(hospi),
+    )
+    for who in (make(), make(role="oc"), make(role="eb"), hospi):
+        assert client.get("/food/today", headers=auth_header(who)).status_code == 403
+        assert client.get(
+            "/food/today/scans", params={"scanner": hospi}, headers=auth_header(who)
+        ).status_code == 403
+    assert client.get("/food/today").status_code == 401
+
+    admin = make(role="admin")
+    page = client.get("/food/today", headers=auth_header(admin))
+    assert page.status_code == 200
+    body = page.json()
+    assert body["date"] == datetime.now(IST).date().isoformat()
+    assert any(s["email"] == hospi and s["count"] >= 1 for s in body["scanners"])
+
+    plates = client.get(
+        "/food/today/scans", params={"scanner": hospi}, headers=auth_header(admin)
+    ).json()
+    assert any(p["delegate_id"] == delegate_id and p["meal"] == "lunch" for p in plates)

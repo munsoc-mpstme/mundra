@@ -212,7 +212,9 @@ TEXT = {
     "free": "We are free for a break",
     "late": "Running 5 minutes late",
     "accept": "Accepted - come down now",
-    "reject": "Rejected - canteen is full",
+    "reject": "Rejected",
+    "agree": "Offer accepted - we'll be there",
+    "decline": "Offer declined",
 }
 
 
@@ -235,6 +237,31 @@ def test_oc_requests_and_hospitality_answers_with_the_apps_fields(client):
 
     history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
     assert [m["type"] for m in history[-4:]] == ["free", "late", "accept", "reject"]
+
+
+def test_the_oc_answers_an_offer_and_times_come_back_in_history(client):
+    oc, hospitality = make(role="oc"), hospitality_member()
+    cid = committee_id(client, oc)
+    at = "2026-10-30T12:50:00+05:30"
+    offer = post(
+        client, hospitality, cid, type="reject", body="Rejected - come in 10 min (12:50 PM)",
+        payload={"at": at},
+    )
+    assert offer.status_code == 201
+    assert offer.json()["payload"] == {"at": at, "type": "reject"}
+    for kind in ("agree", "decline"):
+        check_saved(post(client, oc, cid, type=kind), kind, oc, cid)
+    history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
+    assert [m["type"] for m in history[-3:]] == ["reject", "agree", "decline"]
+    assert history[-3]["payload"]["at"] == at
+
+
+def test_only_the_rooms_side_answers_an_offer(client):
+    oc = make(role="oc")
+    cid = committee_id(client, oc)
+    for who in (hospitality_member(), make(), make(role="eb")):
+        for kind in ("agree", "decline"):
+            assert post(client, who, cid, type=kind).status_code == 403
 
 
 def test_the_oc_role_cannot_accept_or_reject(client):
@@ -281,7 +308,7 @@ def test_a_rapporteur_requests_only_for_their_own_committee(client):
 def test_admin_can_use_every_action(client):
     admin = make(role="admin")
     cid = committee_id(client, admin)
-    for kind in ("free", "late", "accept", "reject"):
+    for kind in ("free", "late", "accept", "reject", "agree", "decline"):
         assert post(client, admin, cid, type=kind).status_code == 201
 
 
@@ -423,13 +450,13 @@ def test_a_plain_eb_runs_the_floor_the_way_the_app_does(client):
     assert set(matrix[0]) == {"name", "code", "tag", "detail"}
     assert client.get(f"/public/committees/{cid}/portfolios").json() == []
 
-    # CCC's matrix is 24 historical figures: people, so no flag code.
+    # CCC's matrix is 24 historical figures, each with the placard flag they sit behind.
     ccc = next(c["id"] for c in committees if c["name"] == "CCC")
     ccc_matrix = client.get(f"/public/committees/{ccc}/portfolios").json()
     assert len(ccc_matrix) == 24
-    assert ccc_matrix[0]["name"] == "Cornell Franklin"
-    assert ccc_matrix[-1]["name"] == "Dr. Oskar Trautmann"
-    assert all(p["code"] is None for p in ccc_matrix)
+    assert (ccc_matrix[0]["name"], ccc_matrix[0]["code"]) == ("Cornell Franklin", "us")
+    assert (ccc_matrix[-1]["name"], ccc_matrix[-1]["code"]) == ("Dr. Oskar Trautmann", "de-imp")
+    assert all(p["code"] for p in ccc_matrix)
 
     def send(body):
         res = client.post(f"/committees/{cid}/floor/ops", json=body, headers=headers)

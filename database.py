@@ -500,6 +500,11 @@ def _local_date(moment: datetime) -> date:
     return moment.astimezone(_event_tz()).date()
 
 
+def local_date(moment: datetime) -> date:
+    """The conference's local date of a moment (public form of _local_date)."""
+    return _local_date(moment)
+
+
 def _end_of_local_day(moment: datetime | None) -> datetime | None:
     """The midnight that closes the local day containing this moment. Team access ends
     here, so it lasts through the event's last day whatever time the end was given as."""
@@ -1254,6 +1259,116 @@ async def get_plate_count(event_id: int, day: int, meal: str) -> models.MealCoun
         jain=by_pref.get("jain", 0),
         unspecified=by_pref.get(None, 0),
     )
+
+
+def _served_diet():
+    """The diet a plate counts under: what the scanner picked, else the delegate's
+    registered preference (scans made without a diet)."""
+    return func.coalesce(db.MealScanRow.diet, db.MMDelegateRow.food_preference)
+
+
+async def get_food_today(event_id: int, day: int, today: date) -> models.FoodToday:
+    """Every plate served on one day (all meals), by diet and by who scanned it."""
+    on_day = (db.MealScanRow.event_id == event_id, db.MealScanRow.day == day)
+    diet = _served_diet()
+    async with db.SessionLocal() as session:
+        by_diet = (
+            await session.execute(
+                select(diet, func.count())
+                .select_from(db.MealScanRow)
+                .join(
+                    db.MMDelegateRow,
+                    db.MMDelegateRow.delegate_id == db.MealScanRow.delegate_id,
+                    isouter=True,
+                )
+                .where(*on_day)
+                .group_by(diet)
+            )
+        ).all()
+        by_scanner = (
+            await session.execute(
+                select(
+                    db.MealScanRow.served_by,
+                    db.DelegateRow.firstname,
+                    db.DelegateRow.lastname,
+                    func.count(),
+                )
+                .select_from(db.MealScanRow)
+                # A scanner whose account is gone still has their scans: shown by email.
+                .join(
+                    db.DelegateRow,
+                    db.DelegateRow.email == db.MealScanRow.served_by,
+                    isouter=True,
+                )
+                .where(*on_day)
+                .group_by(
+                    db.MealScanRow.served_by,
+                    db.DelegateRow.firstname,
+                    db.DelegateRow.lastname,
+                )
+                .order_by(func.count().desc(), db.MealScanRow.served_by)
+            )
+        ).all()
+
+    counts = {d: n for d, n in by_diet}
+    return models.FoodToday(
+        date=today,
+        total=sum(counts.values()),
+        veg=counts.get("veg", 0),
+        jain=counts.get("jain", 0),
+        non_veg=counts.get("non_veg", 0),
+        unspecified=counts.get(None, 0),
+        scanners=[
+            models.ScannerCount(
+                email=email,
+                name=f"{first} {last}".strip() if first is not None else email,
+                count=count,
+            )
+            for email, first, last, count in by_scanner
+        ],
+    )
+
+
+async def get_plates_scanned_by(
+    event_id: int, day: int, scanner: str
+) -> list[models.ScannedPlate]:
+    """The plates one person scanned on one day, newest first."""
+    diet = _served_diet()
+    async with db.SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(
+                    db.MealScanRow.delegate_id,
+                    db.DelegateRow.firstname,
+                    db.DelegateRow.lastname,
+                    db.MealScanRow.meal,
+                    diet,
+                    db.MealScanRow.created_at,
+                )
+                .join(db.DelegateRow, db.DelegateRow.id == db.MealScanRow.delegate_id)
+                .join(
+                    db.MMDelegateRow,
+                    db.MMDelegateRow.delegate_id == db.MealScanRow.delegate_id,
+                    isouter=True,
+                )
+                .where(
+                    db.MealScanRow.event_id == event_id,
+                    db.MealScanRow.day == day,
+                    db.MealScanRow.served_by == scanner,
+                )
+                .order_by(db.MealScanRow.created_at.desc(), db.MealScanRow.id.desc())
+            )
+        ).all()
+    return [
+        models.ScannedPlate(
+            delegate_id=delegate_id,
+            name=f"{first} {last}".strip(),
+            meal=meal,
+            diet=served,
+            at=at,
+        )
+        for delegate_id, first, last, meal, served, at in rows
+    ]
 
 
 async def get_flagged_scans(event_id: int) -> list[models.FlaggedScan]:

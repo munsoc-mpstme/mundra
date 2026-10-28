@@ -174,8 +174,9 @@ class CommitteeStatusChange(BaseModel):
 
 
 # The quick actions the Delego app sends for break coordination. They are stored as a
-# `status` message whose payload is {"type": <one of these>}.
-BreakAction = Literal["free", "late", "accept", "reject"]
+# `status` message whose payload is {"type": <one of these>}, plus `at` (an ISO time)
+# when the message names a time.
+BreakAction = Literal["free", "late", "accept", "reject", "agree", "decline"]
 
 
 class NewChatMessage(BaseModel):
@@ -291,6 +292,39 @@ class MealCount(BaseModel):
     non_veg: int = 0
     jain: int = 0
     unspecified: int = 0
+
+
+class ScannerCount(BaseModel):
+    """How many plates one person scanned today."""
+
+    email: str
+    name: str
+    count: int
+
+
+class FoodToday(BaseModel):
+    """Today's plates for the admin's Food page: all of today's meals together, broken
+    down by diet, and who scanned them (most first). `date` is the conference's local
+    date, for display."""
+
+    date: date
+    total: int = 0
+    veg: int = 0
+    jain: int = 0
+    non_veg: int = 0
+    unspecified: int = 0
+    scanners: list[ScannerCount] = []
+
+
+class ScannedPlate(BaseModel):
+    """One plate a scanner served today: who to, which meal, what diet, when the server
+    recorded it (a scan saved offline shows when it was uploaded)."""
+
+    delegate_id: str
+    name: str
+    meal: Meal
+    diet: str | None = None
+    at: datetime
 
 
 class Badge(BaseModel):
