@@ -551,7 +551,7 @@ def test_the_matrices_are_seeded(client):
         "name": "Ajay Maken", "code": None, "tag": "INC", "detail": "Indian National Congress",
     }
     assert all(p["code"] is None and p["tag"] for p in psc)
-    assert matrix("CCC") == [] and matrix("IPC") == []
+    assert len(matrix("CCC")) == 24 and matrix("IPC") == []
     assert "Equatorial Guinea" in {p["name"] for p in matrix("UNICEF")}  # sheet typo fixed
 
 
@@ -588,9 +588,9 @@ def test_a_psc_member_carries_their_party_tag(client, eb):
 
 
 def test_a_committee_without_a_matrix_is_free_entry(client, eb):
-    ccc = committee_id(client, "CCC")
-    op(client, ccc, eb, op="clear", list="gsl")
-    res = op(client, ccc, eb, op="add", list="gsl", name="Atlantis", code="gr")
+    ipc = committee_id(client, "IPC")  # the press never has a matrix
+    op(client, ipc, eb, op="clear", list="gsl")
+    res = op(client, ipc, eb, op="add", list="gsl", name="Atlantis", code="gr")
     entry = res.json()["state"]["lists"]["gsl"]["entries"][-1]
     assert entry["name"] == "Atlantis" and entry["code"] == "gr"
-    op(client, ccc, eb, op="clear", list="gsl")
+    op(client, ipc, eb, op="clear", list="gsl")

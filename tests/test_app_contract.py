@@ -450,13 +450,13 @@ def test_a_plain_eb_runs_the_floor_the_way_the_app_does(client):
     assert set(matrix[0]) == {"name", "code", "tag", "detail"}
     assert client.get(f"/public/committees/{cid}/portfolios").json() == []
 
-    # CCC's matrix is 24 historical figures: people, so no flag code.
+    # CCC's matrix is 24 historical figures, each with the placard flag they sit behind.
     ccc = next(c["id"] for c in committees if c["name"] == "CCC")
     ccc_matrix = client.get(f"/public/committees/{ccc}/portfolios").json()
     assert len(ccc_matrix) == 24
-    assert ccc_matrix[0]["name"] == "Cornell Franklin"
-    assert ccc_matrix[-1]["name"] == "Dr. Oskar Trautmann"
-    assert all(p["code"] is None for p in ccc_matrix)
+    assert (ccc_matrix[0]["name"], ccc_matrix[0]["code"]) == ("Cornell Franklin", "us")
+    assert (ccc_matrix[-1]["name"], ccc_matrix[-1]["code"]) == ("Dr. Oskar Trautmann", "de-imp")
+    assert all(p["code"] for p in ccc_matrix)
 
     def send(body):
         res = client.post(f"/committees/{cid}/floor/ops", json=body, headers=headers)
