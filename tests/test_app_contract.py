@@ -212,7 +212,7 @@ TEXT = {
     "free": "We are free for a break",
     "late": "Running 5 minutes late",
     "accept": "Accepted - come down now",
-    "reject": "Rejected - canteen is full",
+    "reject": "Rejected",
     "agree": "Offer accepted - we'll be there",
     "decline": "Offer declined",
 }
@@ -244,7 +244,7 @@ def test_the_oc_answers_an_offer_and_times_come_back_in_history(client):
     cid = committee_id(client, oc)
     at = "2026-10-30T12:50:00+05:30"
     offer = post(
-        client, hospitality, cid, type="reject", body="Canteen full - come in 10 min (12:50)",
+        client, hospitality, cid, type="reject", body="Rejected - come in 10 min (12:50 PM)",
         payload={"at": at},
     )
     assert offer.status_code == 201
