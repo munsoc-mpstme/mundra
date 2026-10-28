@@ -174,8 +174,9 @@ class CommitteeStatusChange(BaseModel):
 
 
 # The quick actions the Delego app sends for break coordination. They are stored as a
-# `status` message whose payload is {"type": <one of these>}.
-BreakAction = Literal["free", "late", "accept", "reject"]
+# `status` message whose payload is {"type": <one of these>}, plus `at` (an ISO time)
+# when the message names a time.
+BreakAction = Literal["free", "late", "accept", "reject", "agree", "decline"]
 
 
 class NewChatMessage(BaseModel):

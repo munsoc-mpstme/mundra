@@ -1357,6 +1357,8 @@ _BREAK_TEXT = {
     "late": "Running 5 minutes late",
     "accept": "Accepted - come down now",
     "reject": "Rejected - canteen is full",
+    "agree": "Offer accepted - we'll be there",
+    "decline": "Offer declined",
 }
 
 

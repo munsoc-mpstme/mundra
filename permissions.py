@@ -119,7 +119,9 @@ OC_BASELINE_ROLES = ("oc",)
 
 # The break-coordination quick actions. Requesting is one side of the conversation,
 # answering the other: the committee side asks, hospitality answers.
-BREAK_REQUEST_ACTIONS = ("free", "late")
+# The room's side: ask for a break, say it is running late, and answer Hospitality's
+# offer of a time (agree to it, or decline with a time of their own).
+BREAK_REQUEST_ACTIONS = ("free", "late", "agree", "decline")
 BREAK_RESPONSE_ACTIONS = ("accept", "reject")
 
 
@@ -150,8 +152,9 @@ def can_use_break_action(
 ) -> bool:
     """Whether a user may send this quick action in this committee's chat. Same rule the
     app uses to show the buttons: admins and heads may send any; the OC role may request
-    (free, late); a committee's own rapporteur may request for that committee; only an
-    unscoped team member with chat.post (hospitality) may accept or reject."""
+    (free, late) and answer an offer (agree, decline); a committee's own rapporteur may
+    do the same for that committee; only an unscoped team member with chat.post
+    (hospitality) may accept or reject."""
     if role == "admin" or is_head:
         return True
     if action in BREAK_REQUEST_ACTIONS:

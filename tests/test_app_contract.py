@@ -213,6 +213,8 @@ TEXT = {
     "late": "Running 5 minutes late",
     "accept": "Accepted - come down now",
     "reject": "Rejected - canteen is full",
+    "agree": "Offer accepted - we'll be there",
+    "decline": "Offer declined",
 }
 
 
@@ -235,6 +237,31 @@ def test_oc_requests_and_hospitality_answers_with_the_apps_fields(client):
 
     history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
     assert [m["type"] for m in history[-4:]] == ["free", "late", "accept", "reject"]
+
+
+def test_the_oc_answers_an_offer_and_times_come_back_in_history(client):
+    oc, hospitality = make(role="oc"), hospitality_member()
+    cid = committee_id(client, oc)
+    at = "2026-10-30T12:50:00+05:30"
+    offer = post(
+        client, hospitality, cid, type="reject", body="Canteen full - come in 10 min (12:50)",
+        payload={"at": at},
+    )
+    assert offer.status_code == 201
+    assert offer.json()["payload"] == {"at": at, "type": "reject"}
+    for kind in ("agree", "decline"):
+        check_saved(post(client, oc, cid, type=kind), kind, oc, cid)
+    history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
+    assert [m["type"] for m in history[-3:]] == ["reject", "agree", "decline"]
+    assert history[-3]["payload"]["at"] == at
+
+
+def test_only_the_rooms_side_answers_an_offer(client):
+    oc = make(role="oc")
+    cid = committee_id(client, oc)
+    for who in (hospitality_member(), make(), make(role="eb")):
+        for kind in ("agree", "decline"):
+            assert post(client, who, cid, type=kind).status_code == 403
 
 
 def test_the_oc_role_cannot_accept_or_reject(client):
@@ -281,7 +308,7 @@ def test_a_rapporteur_requests_only_for_their_own_committee(client):
 def test_admin_can_use_every_action(client):
     admin = make(role="admin")
     cid = committee_id(client, admin)
-    for kind in ("free", "late", "accept", "reject"):
+    for kind in ("free", "late", "accept", "reject", "agree", "decline"):
         assert post(client, admin, cid, type=kind).status_code == 201
 
 
