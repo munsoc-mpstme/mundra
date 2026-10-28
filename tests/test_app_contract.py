@@ -482,3 +482,14 @@ def test_a_plain_eb_runs_the_floor_the_way_the_app_does(client):
 
     with client.websocket_connect(f"/ws/committees/{cid}/floor") as ws:
         assert ws.receive_json()["state"]["lists"]["gsl"]["entries"] == []
+
+
+def test_study_guides_endpoint(client):
+    res = client.get("/study_guides")
+    assert res.status_code == 200
+    data = res.json()
+    assert "guides" in data
+    by_comm = {g["committee"]: g for g in data["guides"]}
+    assert "UNSC" in by_comm and "IPC" in by_comm
+    assert by_comm["UNSC"]["agendas"][0]["url"] == "/static/study_guides/UNSC.pdf"
+    assert by_comm["IPC"]["agendas"][0]["url"] == "/static/study_guides/IPC.pdf"
