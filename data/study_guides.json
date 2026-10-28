@@ -5,7 +5,7 @@
       "agendas": [
         {
           "title": "UNSC",
-          "url": null
+          "url": "/static/study_guides/UNSC.pdf"
         }
       ]
     },
@@ -14,7 +14,7 @@
       "agendas": [
         {
           "title": "IPC",
-          "url": null
+          "url": "/static/study_guides/IPC.pdf"
         }
       ]
     }
