@@ -1719,8 +1719,9 @@ async def reset_password(
 ###############################################
 
 ROOMS_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "rooms.json")
+FLOOR_PLANS_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "floor_plans.json")
 
-@lru_cache()
+
 def read_rooms_data():
     """Reads and parses the rooms data from the JSON file."""
     try:
@@ -1728,7 +1729,7 @@ def read_rooms_data():
         if not os.path.exists(ROOMS_FILE_PATH):
             return HTTPException(status_code=500, detail="Error reading rooms data: File does not exist")
         
-        with open(ROOMS_FILE_PATH, "r") as f:
+        with open(ROOMS_FILE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
             
     except json.JSONDecodeError:
@@ -1759,11 +1760,96 @@ def get_rooms():
     except Exception as e:
         # Catch any other unexpected errors
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
-    
-    
+
+
+def read_floor_plans_data():
+    """Reads and parses the floor plans layout data from data/floor_plans.json."""
+    try:
+        if not os.path.exists(FLOOR_PLANS_FILE_PATH):
+            return {"canvas_width": 1000, "canvas_height": 1000, "floors": []}
+        with open(FLOOR_PLANS_FILE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Error reading floor plans data: Invalid JSON format")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error while fetching floor plans data: {str(e)}")
+
+
+@app.get(
+    "/floor_plans",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_floor_plans():
+    """Returns the dynamic building floor plans from data/floor_plans.json."""
+    return read_floor_plans_data()
+
+
+STUDY_GUIDES_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "study_guides.json")
+STUDY_GUIDES_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static", "study_guides")
+
+
+def read_study_guides_data():
+    """Reads study guides config from data/study_guides.json and auto-discovers PDFs in static/study_guides/."""
+    try:
+        data = {"guides": []}
+        if os.path.exists(STUDY_GUIDES_FILE_PATH):
+            with open(STUDY_GUIDES_FILE_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict) and isinstance(loaded.get("guides"), list):
+                    data = loaded
+
+        guides_by_key = {
+            str(g.get("committee", "")).strip().upper(): g
+            for g in data.get("guides", [])
+            if isinstance(g, dict) and g.get("committee")
+        }
+
+        if os.path.isdir(STUDY_GUIDES_STATIC_DIR):
+            for fname in sorted(os.listdir(STUDY_GUIDES_STATIC_DIR)):
+                if not fname.lower().endswith(".pdf"):
+                    continue
+                stem = os.path.splitext(fname)[0].strip()
+                key = stem.upper()
+                static_url = f"/static/study_guides/{fname}"
+                if key in guides_by_key:
+                    agendas = guides_by_key[key].setdefault("agendas", [])
+                    if not agendas:
+                        agendas.append({"title": stem, "url": static_url})
+                    elif not agendas[0].get("url"):
+                        agendas[0]["url"] = static_url
+                else:
+                    entry = {
+                        "committee": stem,
+                        "agendas": [{"title": stem, "url": static_url}],
+                    }
+                    data.setdefault("guides", []).append(entry)
+                    guides_by_key[key] = entry
+
+        return data
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Error reading study guides data: Invalid JSON format")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error while fetching study guides data: {str(e)}")
+
+
+@app.get(
+    "/study_guides",
+    tags=["Dynamic Data"],
+    responses={
+        500: {"model": models.ErrorResponse},
+    },
+)
+def get_study_guides():
+    """Returns backend-hosted study guides from data/study_guides.json and static/study_guides/."""
+    return read_study_guides_data()
+
+
 SCHEDULE_FILE_PATH = os.path.join(os.path.dirname(__file__), "data", "schedule.json")
 
-@lru_cache()
+
 def read_schedule_data():
     """Reads and parses the full schedule data from the JSON file."""
     try:
@@ -1901,12 +1987,45 @@ async def _committee_exists(committee_id: int) -> bool:
 _matrices: dict[int, tuple[float, list[dict]]] = {}
 
 
+_CCC_FLAGS = {
+    "cornell franklin": "us",
+    "clarence edward gauss": "us",
+    "stirling fessenden": "us",
+    "addie viola smith": "us",
+    "sir william johnston keswick": "gb",
+    "kenneth bourne": "gb",
+    "frederick wernham gerrard": "gb",
+    "sir herbert phillips": "gb",
+    "frederick maze": "gb",
+    "victor sassoon": "gb",
+    "liu xiao": "cn-ccp",
+    "pan hannian": "tw",
+    "liu changsheng": "cn-ccp",
+    "kp chen": "tw",
+    "du yuesheng": "tw",
+    "yu xiaqing": "tw",
+    "huang jinrong": "tw",
+    "fu xiao'an": "tw",
+    "li shiqun": "tw",
+    "dai li": "tw-kmt",
+    "ding mocun": "tw",
+    "marcel baudez": "fr",
+    "robert jacquinot de besange": "fr",
+    "dr. oskar trautmann": "de-imp",
+}
+
+
 async def _committee_matrix(committee_id: int) -> list[dict]:
     now = time.monotonic()
     cached = _matrices.get(committee_id)
     if cached is not None and now - cached[0] < 300:
         return cached[1]
     matrix = await database.list_committee_portfolios(committee_id)
+    for p in matrix:
+        if not p.get("code"):
+            fallback_code = _CCC_FLAGS.get(str(p.get("name", "")).strip().casefold())
+            if fallback_code:
+                p["code"] = fallback_code
     _matrices[committee_id] = (now, matrix)
     return matrix
 
