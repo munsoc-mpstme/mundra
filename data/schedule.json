@@ -17,9 +17,9 @@
     {
       "id": "1",
       "day": "Day 1",
-      "name": "Registration Desk",
+      "name": "Registration",
       "location": "MPSTME Main Gate",
-      "time": "9:00 - 10:30 AM",
+      "time": "9:00 AM - 10:30 AM",
       "description": "Register as the delegate and recieve a welcome kit.",
       "image": "https://mundra.onrender.com/static/registration.jpg"
     },
@@ -37,16 +37,16 @@
       "day": "Day 1",
       "name": "Lunch",
       "location": "Canteen",
-      "time": "12:00 PM - 2:00 PM",
+      "time": "12:00 PM - 1:30 PM",
       "description": "Lunch to get started with delegating.",
       "image": "https://mundra.onrender.com/static/canteen.jpg"
     },
     {
       "id": "4",
       "day": "Day 1",
-      "name": "Committee Session 1",
+      "name": "Committee Session I",
       "location": "Committee Room",
-      "time": "2:00 PM - 5:00 PM",
+      "time": "1:30 PM - 5:00 PM",
       "description": "MUN Commences",
       "image": "https://mundra.onrender.com/static/mun.jpg"
     },
@@ -73,14 +73,14 @@
       "day": "Day 2",
       "name": "Breakfast",
       "location": "Canteen",
-      "time": "8:00 - 9:00 AM",
+      "time": "8:00 AM - 9:00 AM",
       "description": "Have breakfast to get started.",
       "image": "https://mundra.onrender.com/static/canteen.jpg"
     },
     {
       "id": "8",
       "day": "Day 2",
-      "name": "Committee Session 2",
+      "name": "Committee Session II",
       "location": "Committee Room",
       "time": "9:00 AM - 12:30 PM",
       "description": "MUN Session 2",
@@ -98,7 +98,7 @@
     {
       "id": "10",
       "day": "Day 2",
-      "name": "Committee Session 3",
+      "name": "Committee Session III",
       "location": "Committee Room",
       "time": "2:00 PM - 5:30 PM",
       "description": "MUN Session 3",
@@ -118,14 +118,14 @@
       "day": "Day 3",
       "name": "Breakfast",
       "location": "Canteen",
-      "time": "8:00 - 9:00 AM",
+      "time": "8:00 AM - 9:00 AM",
       "description": "Have breakfast to get started.",
       "image": "https://mundra.onrender.com/static/canteen.jpg"
     },
     {
       "id": "13",
       "day": "Day 3",
-      "name": "Committee Session 4",
+      "name": "Committee Session IV",
       "location": "Committee Room",
       "time": "9:00 AM - 12:30 PM",
       "description": "MUN Session 4",
@@ -143,7 +143,7 @@
     {
       "id": "15",
       "day": "Day 3",
-      "name": "Committee Session 5",
+      "name": "Committee Session V",
       "location": "Committee Room",
       "time": "1:30 PM - 4:30 PM",
       "description": "Final MUN Session",
