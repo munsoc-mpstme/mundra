@@ -59,7 +59,7 @@ import models
 import permissions
 import utils
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 ####################
 
@@ -1128,6 +1128,44 @@ async def flagged_scans(user: models.AuthUser = Depends(require_food)):
     except LookupError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await database.get_flagged_scans(event_id)
+
+
+async def _food_today() -> tuple[int, int, date]:
+    """(event_id, day, local date) for today, from one clock reading so the date shown
+    and the day counted always agree, even right at midnight. The day is the one scans
+    are filed under (see database.resolve_scan_day)."""
+    now = datetime.now(timezone.utc)
+    try:
+        event_id, day = await database.resolve_scan_day(now=now)
+    except LookupError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return event_id, day, database.local_date(now)
+
+
+@app.get(
+    "/food/today",
+    tags=["Food"],
+    response_model=models.FoodToday,
+    responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
+)
+async def food_today(user: models.AuthUser = Depends(require_admin)):
+    """Admin only: today's plates across all meals (total, by diet) and how many each
+    person scanned. Read-only; the app asks for it when the Food page opens or is
+    refreshed."""
+    event_id, day, today = await _food_today()
+    return await database.get_food_today(event_id, day, today)
+
+
+@app.get(
+    "/food/today/scans",
+    tags=["Food"],
+    response_model=list[models.ScannedPlate],
+    responses={400: {"model": models.ErrorResponse}, 403: {"model": models.ErrorResponse}},
+)
+async def food_today_scans(scanner: str, user: models.AuthUser = Depends(require_admin)):
+    """Admin only: the plates one person (by email) scanned today, newest first."""
+    event_id, day, _ = await _food_today()
+    return await database.get_plates_scanned_by(event_id, day, scanner.strip())
 
 
 #####################################

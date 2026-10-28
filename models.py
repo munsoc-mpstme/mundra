@@ -294,6 +294,39 @@ class MealCount(BaseModel):
     unspecified: int = 0
 
 
+class ScannerCount(BaseModel):
+    """How many plates one person scanned today."""
+
+    email: str
+    name: str
+    count: int
+
+
+class FoodToday(BaseModel):
+    """Today's plates for the admin's Food page: all of today's meals together, broken
+    down by diet, and who scanned them (most first). `date` is the conference's local
+    date, for display."""
+
+    date: date
+    total: int = 0
+    veg: int = 0
+    jain: int = 0
+    non_veg: int = 0
+    unspecified: int = 0
+    scanners: list[ScannerCount] = []
+
+
+class ScannedPlate(BaseModel):
+    """One plate a scanner served today: who to, which meal, what diet, when the server
+    recorded it (a scan saved offline shows when it was uploaded)."""
+
+    delegate_id: str
+    name: str
+    meal: Meal
+    diet: str | None = None
+    at: datetime
+
+
 class Badge(BaseModel):
     """A delegate's own food badge: the string their QR encodes, and what it says."""
 
