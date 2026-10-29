@@ -2,55 +2,55 @@
   {
     "id": "unsc_1",
     "committee_name": "UNSC",
-    "room_code": "CR 408",
+    "room_code": "CR 403",
     "floor": "Floor 4"
   },
   {
     "id": "ccc_2",
     "committee_name": "CCC",
-    "room_code": "CR 404",
-    "floor": "Floor 4"
+    "room_code": "CR 105",
+    "floor": "Floor 1"
   },
   {
     "id": "psc_3",
     "committee_name": "PSC",
-    "room_code": "CR 405",
+    "room_code": "CR 404",
     "floor": "Floor 4"
   },
   {
     "id": "wto_4",
     "committee_name": "WTO",
-    "room_code": "CR 403",
-    "floor": "Floor 4"
+    "room_code": "CR 103",
+    "floor": "Floor 1"
   },
   {
     "id": "unodc_5",
     "committee_name": "UNODC",
-    "room_code": "CR 401",
-    "floor": "Floor 4"
+    "room_code": "CR 106",
+    "floor": "Floor 1"
   },
   {
     "id": "unicef_6",
     "committee_name": "UNICEF",
-    "room_code": "CR 402",
-    "floor": "Floor 4"
+    "room_code": "CR 102",
+    "floor": "Floor 1"
   },
   {
     "id": "ecosoc_7",
     "committee_name": "ECOSOC",
-    "room_code": "CR 102",
+    "room_code": "CR 104",
     "floor": "Floor 1"
   },
   {
     "id": "ipc_8",
     "committee_name": "IPC",
-    "room_code": "TR 401",
+    "room_code": "CR 408",
     "floor": "Floor 4"
   },
   {
     "id": "disec_9",
     "committee_name": "DISEC",
-    "room_code": "CR 103",
+    "room_code": "CR 101",
     "floor": "Floor 1"
   }
 ]
