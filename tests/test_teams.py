@@ -205,10 +205,10 @@ def test_me_exposes_teams_and_permissions(client):
     body = res.json()
     assert body["is_head"] is False
     # The team's own permission, plus the strings the Delego app gates screens on: this
-    # delegate-role member gets the delegate screens and, from the team, the scanner.
+    # delegate-role member gets the delegate screens but NOT the scanner, because scanning
+    # needs the OC role as well as the food team.
     assert body["permissions"] == sorted(
-        {permissions.FOOD_MANAGE_ENTITLEMENT, permissions.APP_FOOD_SCAN}
-        | permissions.APP_ROLE_PERMISSIONS["delegate"]
+        {permissions.FOOD_MANAGE_ENTITLEMENT} | permissions.APP_ROLE_PERMISSIONS["delegate"]
     )
     assert body["teams"] == [
         {

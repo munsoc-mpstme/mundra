@@ -858,13 +858,28 @@ app.include_router(mm_router)
 # FOOD: preference and meal scanning (docs/adr/0003)
 #####################################
 
-# Whoever runs the food counter: scans, plate counts and the flagged list.
+# The flagged-scan list stays team/head only.
 require_food = require_permission(permissions.FOOD_MANAGE_ENTITLEMENT)
-# Scanning meals and reading plate counts: any OC member, as well as teams/heads with the
-# food permission. (The flagged-scan list above stays team/head only.)
-require_food_scan = require_permission(
-    permissions.FOOD_MANAGE_ENTITLEMENT, roles=permissions.OC_BASELINE_ROLES
-)
+
+
+async def require_food_scan(
+    user: models.AuthUser = Depends(get_current_user),
+) -> models.AuthUser:
+    """Scan meal QR codes and read plate counts: an admin, or an OC-role member who is also
+    on the food team (a team membership granting food.manage_entitlement). Both are required
+    for OC: the OC role alone, food-team membership alone, or any other role (including a
+    head who is not admin) cannot scan."""
+    if user.role == "admin":
+        return user
+    if user.role == "oc":
+        _, _, memberships = await database.get_effective_access(user.email)
+        if any(
+            permissions.FOOD_MANAGE_ENTITLEMENT in m.permissions for m in memberships
+        ):
+            return user
+    raise HTTPException(
+        status_code=403, detail="Scanning needs an OC member who is also on the food team"
+    )
 
 # The app (and older clients) call the third meal "high_tea"; the database says "hitea".
 _MEAL_ALIASES = {"high_tea": "hitea", "high-tea": "hitea", "hightea": "hitea"}
@@ -2135,7 +2150,7 @@ async def committee_floor_op(
 ):
     """Change a committee's floor with one op (add, remove, move, clear, set_speaker_time,
     start_speaker, start_unmod, pause, resume, reset, next, set_display) and get the new
-    state back. Everyone watching the floor gets it too. For EBs, OC, admins and heads."""
+    state back. Everyone watching the floor gets it too. For EBs, admins and heads."""
     is_head = False
     if user.role not in permissions.FLOOR_ROLES:
         is_head, _, _ = await database.get_effective_access(user.email)

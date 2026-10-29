@@ -14,6 +14,10 @@ FOOD_VIEW_ARRIVALS = "food.view_arrivals"  # the live "committees inbound" count
 CHAT_POST = "chat.post"
 CHAT_VIEW = "chat.view"
 
+# In-house Logistics (IHL): the team that asks for breaks in a committee's chat. A team
+# granted this verb is the IHL team (as food.manage_entitlement marks the food team).
+IHL_REQUEST_BREAK = "ihl.request_break"
+
 # Rapporteur, scoped to their own committee
 RAPPORTEUR_VIEW_OWN_ROSTER = "rapporteur.view_own_roster"
 RAPPORTEUR_SET_COMMITTEE_STATUS = "rapporteur.set_committee_status"
@@ -36,6 +40,7 @@ ALL_PERMISSIONS = frozenset(
         FOOD_VIEW_ARRIVALS,
         CHAT_POST,
         CHAT_VIEW,
+        IHL_REQUEST_BREAK,
         RAPPORTEUR_VIEW_OWN_ROSTER,
         RAPPORTEUR_SET_COMMITTEE_STATUS,
         REGISTRATION_MANUAL_VERIFY,
@@ -85,10 +90,11 @@ APP_ADMIN_ROLES = "admin.roles"  # change other users' roles
 APP_ROLE_PERMISSIONS = {
     "delegate": frozenset({APP_GUIDES_VIEW, APP_BADGE_VIEW}),
     "eb": frozenset({APP_GUIDES_VIEW, APP_BADGE_VIEW, APP_EB_TOOLS}),
-    # An OC member runs the event rather than attending it, so no guides or badge. They
-    # ask for a break or say they are late; accepting or rejecting is for the Hospitality
-    # team (a team member holding chat.post), not for the OC role.
-    "oc": frozenset({APP_BADGE_VIEW, APP_EB_TOOLS, APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST}),
+    # An OC member runs the event rather than attending it, so no guides. EB Tools is for
+    # the EB (and admins). Two things are NOT in this base set, and are added only by team
+    # (see app_permissions): meal scanning (OC on the food team) and requesting a break
+    # (OC on the IHL team). So the OC role alone can do neither.
+    "oc": frozenset({APP_BADGE_VIEW, APP_CHAT_VIEW}),
     "admin": frozenset(
         {
             APP_GUIDES_VIEW,
@@ -96,54 +102,77 @@ APP_ROLE_PERMISSIONS = {
             APP_EB_TOOLS,
             APP_FOOD_SCAN,
             APP_CHAT_VIEW,
-            APP_CHAT_SEND_REQUEST,
+            # Admin answers break requests (accept/reject) but does not make them: only the
+            # IHL team requests.
             APP_CHAT_RESPOND,
             APP_ADMIN_ROLES,
         }
     ),
 }
 
-# Who may change a committee's floor (EB Tools: speakers' lists and timer): the roles that
-# see EB Tools, plus heads. Any committee: each EB picks their own in the app.
-FLOOR_ROLES = ("eb", "oc", "admin")
+# Who may change a committee's floor (EB Tools: speakers' lists and timer): only the EB and
+# admin roles (plus heads). Any committee: each EB picks their own in the app.
+FLOOR_ROLES = ("eb", "admin")
 
 
 def can_run_floor(role: str, is_head: bool) -> bool:
     return role in FLOOR_ROLES or is_head
 
 
-# Roles that hold the OC baseline on the server too: they may scan meals and use break
-# coordination without being on a team. (Teams and heads still work as before.)
+# Roles that hold the OC baseline on the server for break coordination: they may read and
+# post in every committee's chat without being on a team. Meal scanning is NOT part of this
+# baseline (an OC member must also be on the food team to scan).
 OC_BASELINE_ROLES = ("oc",)
 
 
 # The break-coordination quick actions. Requesting is one side of the conversation,
-# answering the other: the committee side asks, hospitality answers.
-# The room's side: ask for a break, say it is running late, and answer Hospitality's
-# offer of a time (agree to it, or decline with a time of their own).
+# answering the other: the IHL team asks, an admin answers. Nobody else may do either.
+# The requesting side: ask for a break, say it is running late, and answer an offered
+# time (agree to it, or decline with a time of their own).
 BREAK_REQUEST_ACTIONS = ("free", "late", "agree", "decline")
 BREAK_RESPONSE_ACTIONS = ("accept", "reject")
+
+
+def on_ihl_team(memberships, committee_name: str | None = None) -> bool:
+    """Whether the user has an IHL team membership. With a committee name, the membership
+    must reach that committee: unscoped (every committee) or scoped to that one."""
+    return any(
+        IHL_REQUEST_BREAK in m.permissions
+        and (committee_name is None or m.committee is None or m.committee == committee_name)
+        for m in memberships
+    )
+
+
+def can_request_break(role: str, memberships, committee_name: str | None = None) -> bool:
+    """Request a break (free, late, agree, decline): an OC-role member who is also on the
+    IHL team. Both are required. Nobody else, not an admin or a head."""
+    return role == "oc" and on_ihl_team(memberships, committee_name)
+
+
+def can_answer_break(role: str) -> bool:
+    """Accept or reject a break request: admins only. Nobody else, not a head or any team."""
+    return role == "admin"
 
 
 def app_permissions(role: str, is_head: bool, team_permissions, memberships=()) -> set[str]:
     """The app-facing permission strings for a user: their role's, plus what OC team
     permissions or being a head add on top. `memberships` are the user's
-    models.Membership objects: chat.post on an unscoped team (hospitality) lets them
-    answer break requests, and on a committee-scoped team (a rapporteur) lets them make
-    requests for that committee."""
+    models.Membership objects. Requesting a break needs the OC role and the IHL team;
+    answering one is for admins only (in their role set)."""
     out = set(APP_ROLE_PERMISSIONS.get(role, ()))
     team = set(team_permissions)
     if is_head:
-        out.update(
-            {APP_FOOD_SCAN, APP_CHAT_VIEW, APP_CHAT_SEND_REQUEST, APP_CHAT_RESPOND}
-        )
-    if FOOD_MANAGE_ENTITLEMENT in team:
+        out.add(APP_CHAT_VIEW)
+    if can_request_break(role, memberships):
+        out.add(APP_CHAT_SEND_REQUEST)
+    # Meal scanning: admins always (their role set), otherwise only an OC-role member who is
+    # also on the food team (a team membership granting food.manage_entitlement). Food-team
+    # membership alone, or the OC role alone, or a head, does not grant it.
+    on_food_team = any(FOOD_MANAGE_ENTITLEMENT in m.permissions for m in memberships)
+    if role == "oc" and on_food_team:
         out.add(APP_FOOD_SCAN)
     if CHAT_VIEW in team:
         out.add(APP_CHAT_VIEW)
-    for m in memberships:
-        if CHAT_POST in m.permissions:
-            out.add(APP_CHAT_RESPOND if m.committee is None else APP_CHAT_SEND_REQUEST)
     return out
 
 
@@ -151,19 +180,12 @@ def can_use_break_action(
     role: str, is_head: bool, memberships, action: str, committee_name: str
 ) -> bool:
     """Whether a user may send this quick action in this committee's chat. Same rule the
-    app uses to show the buttons: admins and heads may send any; the OC role may request
-    (free, late) and answer an offer (agree, decline); a committee's own rapporteur may
-    do the same for that committee; only an unscoped team member with chat.post
-    (hospitality) may accept or reject."""
-    if role == "admin" or is_head:
-        return True
+    app uses to show the buttons: requesting (free, late, agree, decline) is for an OC
+    member on the IHL team (reaching this committee); accepting or rejecting is for admins
+    only. Nobody else may do either, including heads."""
     if action in BREAK_REQUEST_ACTIONS:
-        if role in OC_BASELINE_ROLES:
-            return True
-        return any(
-            CHAT_POST in m.permissions and m.committee == committee_name for m in memberships
-        )
+        return can_request_break(role, memberships, committee_name)
     if action in BREAK_RESPONSE_ACTIONS:
-        return any(CHAT_POST in m.permissions and m.committee is None for m in memberships)
+        return can_answer_break(role)
     return True  # not a break action: the ordinary chat.post check applies
 

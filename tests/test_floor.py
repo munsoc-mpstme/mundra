@@ -74,9 +74,11 @@ def test_unknown_committee_is_404(client, eb):
 def test_only_the_eb_side_can_change_it(client, committee):
     body = {"op": "add", "list": "gsl", "name": "India"}
     assert client.post(f"/committees/{committee}/floor/ops", json=body).status_code == 401
-    delegate = auth_header(make())
-    assert op(client, committee, delegate, **body).status_code == 403
-    for role in ("eb", "oc", "admin"):
+    # Only the EB and admin roles may change the floor; delegate and OC may not.
+    for role in ("delegate", "oc"):
+        res = op(client, committee, auth_header(make(role=role)), **{**body, "name": role})
+        assert res.status_code == 403, role
+    for role in ("eb", "admin"):
         res = op(client, committee, auth_header(make(role=role)), **{**body, "name": role})
         assert res.status_code == 200, role
 

@@ -136,11 +136,14 @@ def test_history_is_returned_in_order(client):
 def test_a_status_quick_action_carries_its_payload(client):
     event = make_event()
     unsc = make_committee(event, "UNSC")
-    rep = rapporteur(event, "UNSC")
+    # A break request: only an OC-role member of the IHL team may send one.
+    ihl = make(role="oc")
+    team = make_team(event, f"IHL-{uuid.uuid4().hex[:6]}", perms=[permissions.IHL_REQUEST_BREAK])
+    add_membership(ihl, event, team)
     res = client.post(
         f"/committees/{unsc}/messages",
         json={"kind": "status", "body": "Running late", "payload": {"type": "late", "minutes": 5}},
-        headers=auth_header(rep),
+        headers=auth_header(ihl),
     )
     assert res.status_code == 201
     assert res.json()["kind"] == "status"

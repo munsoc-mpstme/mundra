@@ -21,15 +21,29 @@ def make(**kwargs):
     return asyncio.run(create_user(**kwargs))
 
 
+def food_oc():
+    """An OC-role user who is also on the food team: the only non-admin who may scan."""
+    from test_teams import add_membership, make_event, make_team
+
+    email = make(role="oc")
+    event = make_event()
+    team = make_team(event, "Food", perms=[permissions.FOOD_MANAGE_ENTITLEMENT])
+    add_membership(email, event, team)
+    return email
+
+
 # ---- /delegates/me: which screens each role gets ---------------------------------------
 
 EXPECTED = {
     "delegate": {"guides.view", "badge.view"},
     "eb": {"guides.view", "badge.view", "eb.tools"},
-    "oc": {"badge.view", "eb.tools", "food.scan", "chat.view", "chat.send_request"},
+    # OC alone can neither scan (needs the food team, see food_oc) nor request a break
+    # (needs the IHL team, see ihl_oc).
+    "oc": {"badge.view", "chat.view"},
+    # Admin answers break requests but never makes them.
     "admin": {
         "guides.view", "badge.view", "eb.tools", "food.scan",
-        "chat.view", "chat.send_request", "chat.respond", "admin.roles",
+        "chat.view", "chat.respond", "admin.roles",
     },
 }
 
@@ -50,19 +64,20 @@ def test_a_team_member_also_gets_the_matching_app_permissions(client):
     team = make_team(event, "Hosp", perms=[permissions.CHAT_VIEW, permissions.CHAT_POST])
     add_membership(email, event, team)
     perms = set(client.get("/delegates/me", headers=auth_header(email)).json()["permissions"])
-    # An unscoped team with chat.post (hospitality) answers requests; it does not make them.
-    assert {"chat.view", "chat.respond"} <= perms
-    assert "chat.send_request" not in perms
+    # A chat team (hospitality) can read the chat, but neither answers nor makes break
+    # requests any more: answering is admin only, requesting is the IHL team only.
+    assert "chat.view" in perms
+    assert "chat.respond" not in perms and "chat.send_request" not in perms
     assert "food.scan" not in perms and "admin.roles" not in perms
 
-    # A committee-scoped team with chat.post (a rapporteur) makes requests for its committee.
+    # A committee-scoped chat team (a rapporteur) no longer makes requests either.
     rapporteur = make()
     scoped = make_team(event, "Rapporteurs-ct", perms=[permissions.CHAT_VIEW, permissions.CHAT_POST])
     add_membership(rapporteur, event, scoped, committee="UNSC")
     perms = set(
         client.get("/delegates/me", headers=auth_header(rapporteur)).json()["permissions"]
     )
-    assert "chat.send_request" in perms and "chat.respond" not in perms
+    assert "chat.send_request" not in perms and "chat.respond" not in perms
 
 
 # ---- meal scanning, as scan_queue.dart sends it ----------------------------------------
@@ -83,7 +98,7 @@ def scan(client, who, delegate_id, meal="breakfast", diet="veg"):
 
 
 def test_oc_scans_high_tea_with_a_diet_and_no_event_dates(client):
-    oc = make(role="oc")
+    oc = food_oc()
     _, delegate_id = make_mm("veg")
 
     res = scan(client, oc, delegate_id, meal="high_tea", diet="jain")
@@ -97,7 +112,7 @@ def test_oc_scans_high_tea_with_a_diet_and_no_event_dates(client):
 
 
 def test_second_scan_of_the_same_meal_is_a_duplicate_but_another_meal_serves(client):
-    oc = make(role="oc")
+    oc = food_oc()
     _, delegate_id = make_mm()
 
     assert scan(client, oc, delegate_id, "lunch").json()["result"] == "served"
@@ -107,7 +122,7 @@ def test_second_scan_of_the_same_meal_is_a_duplicate_but_another_meal_serves(cli
 
 
 def test_scan_rejects_bad_input_and_the_wrong_people(client):
-    oc, delegate_role, eb = make(role="oc"), make(), make(role="eb")
+    oc, delegate_role, eb = food_oc(), make(), make(role="eb")
     _, delegate_id = make_mm()
 
     assert scan(client, oc, delegate_id, meal="supper").status_code == 422
@@ -115,11 +130,41 @@ def test_scan_rejects_bad_input_and_the_wrong_people(client):
     assert scan(client, oc, "no-such-id").status_code == 404
     assert scan(client, delegate_role, delegate_id).status_code == 403
     assert scan(client, eb, delegate_id).status_code == 403
+
+
+def test_only_admin_or_oc_on_the_food_team_can_scan(client):
+    """Scanning needs BOTH the OC role and the food team (or admin)."""
+    from test_teams import add_membership, make_event, make_team
+
+    _, delegate_id = make_mm()
+
+    # The OC role alone: refused, and the app does not show the scanner.
+    oc_only = make(role="oc")
+    assert scan(client, oc_only, delegate_id).status_code == 403
+    me = client.get("/delegates/me", headers=auth_header(oc_only)).json()
+    assert "food.scan" not in me["permissions"]
+
+    # The food team alone (a delegate-role member): refused too.
+    team_only = make()
+    event = make_event()
+    team = make_team(event, "Food-only", perms=[permissions.FOOD_MANAGE_ENTITLEMENT])
+    add_membership(team_only, event, team)
+    assert scan(client, team_only, delegate_id).status_code == 403
+    me = client.get("/delegates/me", headers=auth_header(team_only)).json()
+    assert "food.scan" not in me["permissions"]
+
+    # OC and on the food team: allowed, and the app shows the scanner.
+    both = food_oc()
+    assert "food.scan" in client.get("/delegates/me", headers=auth_header(both)).json()["permissions"]
+    assert scan(client, both, delegate_id, "lunch").status_code == 200
+
+    # Admin: always allowed.
+    assert scan(client, make(role="admin"), delegate_id, "high_tea").status_code == 200
     assert client.post("/food/scans", data={"delegate_id": "x", "meal": "lunch"}).status_code == 401
 
 
 def test_the_flagged_list_works_before_the_event_dates_are_set(client):
-    oc, admin = make(role="oc"), make(role="admin")
+    oc, admin = food_oc(), make(role="admin")
     _, delegate_id = make_mm()
     scan(client, oc, delegate_id, "lunch")
     scan(client, oc, delegate_id, "lunch")  # the second one is flagged
@@ -131,7 +176,7 @@ def test_the_flagged_list_works_before_the_event_dates_are_set(client):
 
 
 def test_plate_count_follows_the_diet_the_operator_picked(client):
-    oc = make(role="oc")
+    oc = food_oc()
     _, registered_veg = make_mm("veg")
     _, registered_none = make_mm(None)
 
@@ -155,7 +200,10 @@ def test_plate_count_is_for_scanners_only(client):
         "/food/plate_count?meal=lunch", headers=auth_header(make())
     ).status_code == 403
     assert client.get(
-        "/food/plate_count?meal=brunch", headers=auth_header(make(role="oc"))
+        "/food/plate_count?meal=lunch", headers=auth_header(make(role="oc"))
+    ).status_code == 403  # OC alone is not a scanner
+    assert client.get(
+        "/food/plate_count?meal=brunch", headers=auth_header(food_oc())
     ).status_code == 422
 
 
@@ -194,7 +242,8 @@ def post(client, who, cid, **body):
 
 
 def hospitality_member():
-    """A plain delegate-role user on a Hospitality team (scanner + answers requests)."""
+    """A plain delegate-role user on a Hospitality team. It can read and post chat, but it
+    can no longer request or answer a break: that split is IHL and admin only."""
     from test_teams import add_membership, make_event, make_team
 
     email = make()
@@ -205,6 +254,26 @@ def hospitality_member():
         perms=[permissions.FOOD_MANAGE_ENTITLEMENT, permissions.CHAT_VIEW, permissions.CHAT_POST],
     )
     add_membership(email, event, team)
+    return email
+
+
+def ihl_oc(committee=None, role="oc"):
+    """An OC-role user on the IHL team (the only one who may request a break). Pass a
+    committee to scope the membership to it; pass role to build the non-OC case."""
+    from test_teams import add_membership, make_event, make_team
+
+    email = make(role=role)
+    event = make_event()
+    team = make_team(event, "IHL-" + email[:8], perms=[permissions.IHL_REQUEST_BREAK])
+    add_membership(email, event, team, committee=committee)
+    return email
+
+
+def a_head():
+    from test_teams import add_head, make_event
+
+    email = make()
+    add_head(email, make_event())
     return email
 
 
@@ -226,90 +295,101 @@ def check_saved(res, kind, sender, cid):
     assert m["committee_id"] == cid and isinstance(m["id"], int)
 
 
-def test_oc_requests_and_hospitality_answers_with_the_apps_fields(client):
-    oc, hospitality = make(role="oc"), hospitality_member()
-    cid = committee_id(client, oc)
+REQUESTS = ("free", "late", "agree", "decline")
+ANSWERS = ("accept", "reject")
+
+
+def test_ihl_requests_and_admin_answers_with_the_apps_fields(client):
+    ihl, admin = ihl_oc(), make(role="admin")
+    cid = committee_id(client, admin)
 
     for kind in ("free", "late"):
-        check_saved(post(client, oc, cid, type=kind), kind, oc, cid)
-    for kind in ("accept", "reject"):
-        check_saved(post(client, hospitality, cid, type=kind), kind, hospitality, cid)
+        check_saved(post(client, ihl, cid, type=kind), kind, ihl, cid)
+    for kind in ANSWERS:
+        check_saved(post(client, admin, cid, type=kind), kind, admin, cid)
 
-    history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
+    history = client.get(f"/committees/{cid}/messages", headers=auth_header(admin)).json()
     assert [m["type"] for m in history[-4:]] == ["free", "late", "accept", "reject"]
 
 
-def test_the_oc_answers_an_offer_and_times_come_back_in_history(client):
-    oc, hospitality = make(role="oc"), hospitality_member()
-    cid = committee_id(client, oc)
+def test_ihl_answers_an_offer_and_times_come_back_in_history(client):
+    ihl, admin = ihl_oc(), make(role="admin")
+    cid = committee_id(client, admin)
     at = "2026-10-30T12:50:00+05:30"
     offer = post(
-        client, hospitality, cid, type="reject", body="Rejected - come in 10 min (12:50 PM)",
+        client, admin, cid, type="reject", body="Rejected - come in 10 min (12:50 PM)",
         payload={"at": at},
     )
     assert offer.status_code == 201
     assert offer.json()["payload"] == {"at": at, "type": "reject"}
     for kind in ("agree", "decline"):
-        check_saved(post(client, oc, cid, type=kind), kind, oc, cid)
-    history = client.get(f"/committees/{cid}/messages", headers=auth_header(oc)).json()
+        check_saved(post(client, ihl, cid, type=kind), kind, ihl, cid)
+    history = client.get(f"/committees/{cid}/messages", headers=auth_header(admin)).json()
     assert [m["type"] for m in history[-3:]] == ["reject", "agree", "decline"]
     assert history[-3]["payload"]["at"] == at
 
 
-def test_only_the_rooms_side_answers_an_offer(client):
-    oc = make(role="oc")
-    cid = committee_id(client, oc)
-    for who in (hospitality_member(), make(), make(role="eb")):
-        for kind in ("agree", "decline"):
-            assert post(client, who, cid, type=kind).status_code == 403
+def test_nobody_but_ihl_can_request(client):
+    """Requesting needs BOTH the OC role and the IHL team."""
+    cid = committee_id(client, make(role="admin"))
+    not_allowed = {
+        "OC alone": make(role="oc"),
+        "IHL team, not OC": ihl_oc(role="delegate"),
+        "OC on the food team": food_oc(),
+        "hospitality": hospitality_member(),
+        "admin": make(role="admin"),
+        "head": a_head(),
+    }
+    for who_name, who in not_allowed.items():
+        for kind in REQUESTS:
+            res = post(client, who, cid, type=kind)
+            assert res.status_code == 403, (who_name, kind, res.status_code)
 
 
-def test_the_oc_role_cannot_accept_or_reject(client):
-    oc = make(role="oc")
-    cid = committee_id(client, oc)
-    for kind in ("accept", "reject"):
-        assert post(client, oc, cid, type=kind).status_code == 403
+def test_nobody_but_admin_can_accept_or_reject(client):
+    cid = committee_id(client, make(role="admin"))
+    not_allowed = {
+        "IHL (OC on the IHL team)": ihl_oc(),
+        "OC alone": make(role="oc"),
+        "hospitality": hospitality_member(),
+        "head": a_head(),
+    }
+    for who_name, who in not_allowed.items():
+        for kind in ANSWERS:
+            res = post(client, who, cid, type=kind)
+            assert res.status_code == 403, (who_name, kind, res.status_code)
 
 
-def test_hospitality_cannot_make_requests(client):
-    hospitality = hospitality_member()
-    cid = committee_id(client, hospitality)
-    for kind in ("free", "late"):
-        assert post(client, hospitality, cid, type=kind).status_code == 403
+def test_the_app_only_shows_each_side_its_own_buttons(client):
+    perms = lambda who: set(
+        client.get("/delegates/me", headers=auth_header(who)).json()["permissions"]
+    )
+    ihl, admin = perms(ihl_oc()), perms(make(role="admin"))
+    assert "chat.send_request" in ihl and "chat.respond" not in ihl
+    assert "chat.respond" in admin and "chat.send_request" not in admin
+    for who in (make(role="oc"), hospitality_member(), ihl_oc(role="delegate"), a_head()):
+        p = perms(who)
+        assert "chat.send_request" not in p and "chat.respond" not in p
 
 
 def test_the_generic_form_cannot_smuggle_past_the_split(client):
-    oc, hospitality = make(role="oc"), hospitality_member()
-    cid = committee_id(client, oc)
+    ihl, admin = ihl_oc(), make(role="admin")
+    cid = committee_id(client, admin)
     # Same thing as {"type": "accept"}, spelled as an ordinary status message.
-    sneaky = post(client, oc, cid, kind="status", payload={"type": "accept"})
-    assert sneaky.status_code == 403
-    assert post(client, hospitality, cid, kind="status", payload={"type": "free"}).status_code == 403
+    assert post(client, ihl, cid, kind="status", payload={"type": "accept"}).status_code == 403
+    assert post(client, admin, cid, kind="status", payload={"type": "free"}).status_code == 403
     # Status messages with some other payload are not break actions.
-    assert post(client, oc, cid, kind="status", payload={"type": "minutes", "n": 5}).status_code == 201
+    assert post(client, ihl, cid, kind="status", payload={"type": "minutes", "n": 5}).status_code == 201
 
 
-def test_a_rapporteur_requests_only_for_their_own_committee(client):
-    from test_teams import add_membership, make_event, make_team
-
-    rapporteur, event = make(), make_event()
-    team = make_team(
-        event, "Rapporteurs-" + rapporteur[:6], perms=[permissions.CHAT_VIEW, permissions.CHAT_POST]
-    )
-    add_membership(rapporteur, event, team, committee="UNSC")
+def test_a_committee_scoped_ihl_member_requests_only_for_that_committee(client):
+    ihl = ihl_oc(committee="UNSC")
     admin = make(role="admin")
     unsc, ccc = committee_id(client, admin, "UNSC"), committee_id(client, admin, "CCC")
 
-    assert post(client, rapporteur, unsc, type="late").status_code == 201
-    assert post(client, rapporteur, unsc, type="accept").status_code == 403
-    assert post(client, rapporteur, ccc, type="late").status_code == 403
-
-
-def test_admin_can_use_every_action(client):
-    admin = make(role="admin")
-    cid = committee_id(client, admin)
-    for kind in ("free", "late", "accept", "reject", "agree", "decline"):
-        assert post(client, admin, cid, type=kind).status_code == 201
+    assert post(client, ihl, unsc, type="late").status_code == 201
+    assert post(client, ihl, ccc, type="late").status_code == 403
+    assert post(client, ihl, unsc, type="accept").status_code == 403
 
 
 def test_the_live_feed_applies_the_same_split(client):
@@ -349,12 +429,14 @@ def test_plain_upstream_text_messages_still_work_and_appear_as_text(client):
 
 
 def test_live_feed_pushes_a_break_action_with_the_apps_fields(client):
-    oc = make(role="oc")
+    oc = ihl_oc()
     cid = committee_id(client, oc, "CCC")
     token = auth.create_access_token({"sub": oc})
     with client.websocket_connect(f"/ws/committees/{cid}/chat") as ws:
         ws.send_json({"token": token})
-        sent = post(client, oc, cid, type="late").json()
+        res = post(client, oc, cid, type="late")
+        assert res.status_code == 201, res.text  # fail fast instead of waiting on the socket
+        sent = res.json()
         seen = None
         for _ in range(60):  # history replays first; wait for ours (the app dedupes by id)
             msg = ws.receive_json()
@@ -408,10 +490,17 @@ def test_admin_builds_a_hospitality_team_and_its_member_can_scan(client):
     assert team.status_code == 201, team.text
     team_id = team.json()["id"]
 
-    # A delegate-role user who is not on the team cannot scan yet.
-    member = make()
+    # An OC-role user who is not on the team cannot scan yet (OC alone is not enough).
+    member = make(role="oc")
     _, delegate_id = make_mm("veg")
     assert scan(client, member, delegate_id).status_code == 403
+
+    # A delegate-role user on the team still cannot scan: the OC role is required too.
+    delegate_member = make()
+    client.post(
+        f"/teams/{team_id}/members", json={"email": delegate_member, "level": "member"}, headers=h
+    )
+    assert scan(client, delegate_member, delegate_id).status_code == 403
 
     added = client.post(
         f"/teams/{team_id}/members", json={"email": member, "level": "member"}, headers=h
@@ -419,7 +508,7 @@ def test_admin_builds_a_hospitality_team_and_its_member_can_scan(client):
     assert added.status_code == 201 and added.json()["status"] == "member"
 
     roster = client.get(f"/teams/{team_id}/members", headers=h).json()
-    assert [r["email"] for r in roster] == [member]
+    assert sorted(r["email"] for r in roster) == sorted([member, delegate_member])
 
     # The app shows the scanner (food.scan) and the server lets them scan.
     perms = set(client.get("/delegates/me", headers=auth_header(member)).json()["permissions"])

@@ -53,8 +53,9 @@ def make_mm(food_preference=None):
 
 
 def hospitality_member():
-    """A user who holds food.manage_entitlement."""
-    email = make()
+    """An OC-role user on the food team (holds food.manage_entitlement): the combination
+    that may scan."""
+    email = make(role="oc")
     event = make_event()
     add_membership(
         email,
