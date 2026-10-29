@@ -228,7 +228,7 @@ async def register(request: Request, user: models.User):
         500: {"model": models.ErrorResponse},
     },
 )
-@limiter.limit("10/minute")
+@limiter.limit("15/minute")
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     email = form_data.username
     password = form_data.password
@@ -296,7 +296,7 @@ async def _send_code_if_unverified(delegate: models.Delegate) -> bool:
         429: {"model": models.ErrorResponse},
     },
 )
-@limiter.limit("10/minute")
+@limiter.limit("15/minute")
 async def verify_email(request: Request, body: models.VerifyEmail):
     """Verify an email with the 6-digit code that was sent to it."""
     status = await database.check_verification_code(
@@ -325,7 +325,7 @@ async def verify_email(request: Request, body: models.VerifyEmail):
         500: {"model": models.ErrorResponse},
     },
 )
-@limiter.limit("10/minute")
+@limiter.limit("15/minute")
 async def resend_verification_email(request: Request, email: models.EmailStr):
     try:
         delegate = await database.get_delegate_by_email(email)
