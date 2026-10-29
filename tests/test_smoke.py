@@ -163,6 +163,8 @@ def test_rate_limiter_returns_429(client):
     """The limiter must produce a clean 429, not a stack trace."""
     codes = [
         client.post("/login", data={"username": "nobody@example.com", "password": "x"}).status_code
-        for _ in range(15)
+        for _ in range(20)
     ]
-    assert 429 in codes, f"expected a 429 among {codes}"
+    # 15/minute: the first 15 are answered, the rest refused.
+    assert 429 not in codes[:15], f"refused too early: {codes}"
+    assert set(codes[15:]) == {429}, f"expected 429 after 15 tries: {codes}"

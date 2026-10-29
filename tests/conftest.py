@@ -85,7 +85,7 @@ ADMIN_PASSWORD = "admin-password-123"
 @pytest.fixture(autouse=True)
 def _reset_rate_limits():
     """Each test starts with fresh rate limits. Every request comes from the same test
-    client address, so /login's 10/minute would otherwise trip across unrelated tests."""
+    client address, so /login's 15/minute would otherwise trip across unrelated tests."""
     app_module.limiter.reset()
 
 
