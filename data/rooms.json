@@ -2,8 +2,8 @@
   {
     "id": "unsc_1",
     "committee_name": "UNSC",
-    "room_code": "CR 403",
-    "floor": "Floor 4"
+    "room_code": "CR 704",
+    "floor": "Floor 7"
   },
   {
     "id": "ccc_2",
@@ -14,8 +14,8 @@
   {
     "id": "psc_3",
     "committee_name": "PSC",
-    "room_code": "CR 404",
-    "floor": "Floor 4"
+    "room_code": "CR 701",
+    "floor": "Floor 7"
   },
   {
     "id": "wto_4",
@@ -44,8 +44,8 @@
   {
     "id": "ipc_8",
     "committee_name": "IPC",
-    "room_code": "CR 408",
-    "floor": "Floor 4"
+    "room_code": "CR 503",
+    "floor": "Floor 5"
   },
   {
     "id": "disec_9",
