@@ -3,19 +3,679 @@
   "canvas_height": 1000,
   "floors": [
     {
-      "id": "unavailable",
-      "name": "Floor plans",
-      "short_name": "Floor plans",
+      "id": "floor_1",
+      "name": "Floor 1",
+      "short_name": "Floor 1",
       "background_color": "#000000",
-      "fill_color": "#000000",
-      "center_color": "#000000",
-      "border_color": "#62575D",
+      "fill_color": "#9B236D",
+      "center_color": "#EE1C9C",
+      "border_color": "#F5D920",
       "text_color": "#FFFFFF",
-      "accent_text_color": "#FFFFFF",
-      "top_entrance": "Floor plans are not available",
-      "bottom_entrance": "",
-      "use_image": false,
-      "blocks": []
+      "accent_text_color": "#F5D920",
+      "top_entrance": "Bhagubhai Lift Entrance",
+      "bottom_entrance": "Cooper Lift Entrance",
+      "image_url": "/static/floors/floor_1.png",
+      "use_image": true,
+      "blocks": [
+        {
+          "x": 30,
+          "y": 32,
+          "w": 334,
+          "h": 114,
+          "type": "facility",
+          "label": "Faculty Area\n102"
+        },
+        {
+          "x": 376,
+          "y": 32,
+          "w": 115,
+          "h": 114,
+          "type": "wc",
+          "label": ""
+        },
+        {
+          "x": 503,
+          "y": 32,
+          "w": 115,
+          "h": 114,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 630,
+          "y": 32,
+          "w": 340,
+          "h": 114,
+          "type": "facility",
+          "label": "Faculty Area\n101"
+        },
+        {
+          "x": 300,
+          "y": 218,
+          "w": 400,
+          "h": 40,
+          "type": "lift",
+          "label": "Lift"
+        },
+        {
+          "x": 300,
+          "y": 408,
+          "w": 400,
+          "h": 176,
+          "type": "center",
+          "label": "Floor 1"
+        },
+        {
+          "x": 300,
+          "y": 726,
+          "w": 400,
+          "h": 40,
+          "type": "lift",
+          "label": "Lift"
+        },
+        {
+          "x": 300,
+          "y": 270,
+          "w": 195,
+          "h": 126,
+          "type": "room",
+          "label": "CR 107"
+        },
+        {
+          "x": 505,
+          "y": 270,
+          "w": 195,
+          "h": 126,
+          "type": "room",
+          "label": "CR 108"
+        },
+        {
+          "x": 300,
+          "y": 596,
+          "w": 195,
+          "h": 120,
+          "type": "room",
+          "label": "CR 106"
+        },
+        {
+          "x": 505,
+          "y": 596,
+          "w": 195,
+          "h": 120,
+          "type": "room",
+          "label": "CR 105"
+        },
+        {
+          "x": 30,
+          "y": 160,
+          "w": 200,
+          "h": 137,
+          "type": "room",
+          "label": "CR 103"
+        },
+        {
+          "x": 30,
+          "y": 307,
+          "w": 200,
+          "h": 137,
+          "type": "room",
+          "label": "CR 102"
+        },
+        {
+          "x": 30,
+          "y": 454,
+          "w": 200,
+          "h": 76,
+          "type": "room",
+          "label": "CR 101"
+        },
+        {
+          "x": 30,
+          "y": 540,
+          "w": 200,
+          "h": 56,
+          "type": "wc",
+          "label": ""
+        },
+        {
+          "x": 30,
+          "y": 606,
+          "w": 200,
+          "h": 76,
+          "type": "room",
+          "label": "CL 102"
+        },
+        {
+          "x": 30,
+          "y": 692,
+          "w": 200,
+          "h": 76,
+          "type": "room",
+          "label": "CL 101"
+        },
+        {
+          "x": 30,
+          "y": 778,
+          "w": 200,
+          "h": 56,
+          "type": "exit_left",
+          "label": ""
+        },
+        {
+          "x": 770,
+          "y": 160,
+          "w": 200,
+          "h": 266,
+          "type": "room",
+          "label": "CR 104"
+        },
+        {
+          "x": 770,
+          "y": 436,
+          "w": 200,
+          "h": 56,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 770,
+          "y": 502,
+          "w": 200,
+          "h": 266,
+          "type": "facility",
+          "label": "Admissions\nOffice"
+        },
+        {
+          "x": 770,
+          "y": 778,
+          "w": 200,
+          "h": 56,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 30,
+          "y": 844,
+          "w": 228,
+          "h": 126,
+          "type": "facility",
+          "label": "Hardware\nLab 3"
+        },
+        {
+          "x": 268,
+          "y": 844,
+          "w": 228,
+          "h": 126,
+          "type": "facility",
+          "label": "Hardware\nLab 2"
+        },
+        {
+          "x": 505,
+          "y": 844,
+          "w": 228,
+          "h": 126,
+          "type": "facility",
+          "label": "Hardware\nLab 1"
+        },
+        {
+          "x": 742,
+          "y": 844,
+          "w": 228,
+          "h": 126,
+          "type": "facility",
+          "label": "Dean\nOffice"
+        }
+      ]
+    },
+    {
+      "id": "floor_5",
+      "name": "Floor 5",
+      "short_name": "Floor 5",
+      "background_color": "#000000",
+      "fill_color": "#9B236D",
+      "center_color": "#EE1C9C",
+      "border_color": "#F5D920",
+      "text_color": "#FFFFFF",
+      "accent_text_color": "#F5D920",
+      "top_entrance": "Bhagubhai Lift Entrance",
+      "bottom_entrance": "Cooper Lift Entrance",
+      "image_url": "/static/floors/floor_5.jpg",
+      "use_image": true,
+      "blocks": [
+        {
+          "x": 30,
+          "y": 32,
+          "w": 334,
+          "h": 114,
+          "type": "facility",
+          "label": "Faculty Area\n502"
+        },
+        {
+          "x": 376,
+          "y": 32,
+          "w": 115,
+          "h": 114,
+          "type": "wc",
+          "label": ""
+        },
+        {
+          "x": 503,
+          "y": 32,
+          "w": 115,
+          "h": 114,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 630,
+          "y": 32,
+          "w": 340,
+          "h": 114,
+          "type": "facility",
+          "label": "Faculty Area\n501"
+        },
+        {
+          "x": 300,
+          "y": 218,
+          "w": 400,
+          "h": 40,
+          "type": "lift",
+          "label": "Lift"
+        },
+        {
+          "x": 300,
+          "y": 270,
+          "w": 195,
+          "h": 126,
+          "type": "room",
+          "label": "E. CR 508"
+        },
+        {
+          "x": 505,
+          "y": 270,
+          "w": 195,
+          "h": 126,
+          "type": "room",
+          "label": "E. CR 509"
+        },
+        {
+          "x": 300,
+          "y": 408,
+          "w": 400,
+          "h": 176,
+          "type": "center",
+          "label": "Floor 5"
+        },
+        {
+          "x": 300,
+          "y": 596,
+          "w": 195,
+          "h": 120,
+          "type": "room",
+          "label": "E. CR 507"
+        },
+        {
+          "x": 505,
+          "y": 596,
+          "w": 195,
+          "h": 120,
+          "type": "room",
+          "label": "E. CR 506"
+        },
+        {
+          "x": 300,
+          "y": 726,
+          "w": 400,
+          "h": 40,
+          "type": "lift",
+          "label": "Lift"
+        },
+        {
+          "x": 30,
+          "y": 160,
+          "w": 200,
+          "h": 100,
+          "type": "room",
+          "label": "E. CR 503"
+        },
+        {
+          "x": 30,
+          "y": 270,
+          "w": 200,
+          "h": 100,
+          "type": "room",
+          "label": "E. TR 501"
+        },
+        {
+          "x": 30,
+          "y": 380,
+          "w": 200,
+          "h": 100,
+          "type": "room",
+          "label": "E. TR 502"
+        },
+        {
+          "x": 30,
+          "y": 490,
+          "w": 200,
+          "h": 100,
+          "type": "facility",
+          "label": "Girls Common\nRoom"
+        },
+        {
+          "x": 30,
+          "y": 600,
+          "w": 200,
+          "h": 60,
+          "type": "wc",
+          "label": ""
+        },
+        {
+          "x": 30,
+          "y": 670,
+          "w": 200,
+          "h": 50,
+          "type": "exit_left",
+          "label": ""
+        },
+        {
+          "x": 770,
+          "y": 160,
+          "w": 200,
+          "h": 140,
+          "type": "room",
+          "label": "E. CL 502"
+        },
+        {
+          "x": 770,
+          "y": 310,
+          "w": 200,
+          "h": 40,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 770,
+          "y": 360,
+          "w": 200,
+          "h": 115,
+          "type": "room",
+          "label": "E. CR 503"
+        },
+        {
+          "x": 770,
+          "y": 485,
+          "w": 200,
+          "h": 115,
+          "type": "room",
+          "label": "E. CR 504"
+        },
+        {
+          "x": 770,
+          "y": 610,
+          "w": 200,
+          "h": 105,
+          "type": "room",
+          "label": "E. CR 505"
+        },
+        {
+          "x": 770,
+          "y": 725,
+          "w": 200,
+          "h": 41,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 30,
+          "y": 844,
+          "w": 200,
+          "h": 126,
+          "type": "room",
+          "label": "E. CR 502"
+        },
+        {
+          "x": 240,
+          "y": 844,
+          "w": 200,
+          "h": 126,
+          "type": "room",
+          "label": "E. CR 501"
+        },
+        {
+          "x": 560,
+          "y": 844,
+          "w": 140,
+          "h": 126,
+          "type": "room",
+          "label": "E. CL 506"
+        },
+        {
+          "x": 710,
+          "y": 844,
+          "w": 125,
+          "h": 126,
+          "type": "room",
+          "label": "E. CL 505"
+        },
+        {
+          "x": 845,
+          "y": 844,
+          "w": 125,
+          "h": 126,
+          "type": "room",
+          "label": "E. CL 504"
+        }
+      ]
+    },
+    {
+      "id": "floor_7",
+      "name": "Floor 7",
+      "short_name": "Floor 7",
+      "background_color": "#000000",
+      "fill_color": "#0A3FBF",
+      "center_color": "#1565FF",
+      "border_color": "#C6F432",
+      "text_color": "#FFFFFF",
+      "accent_text_color": "#C6F432",
+      "top_entrance": "Bhagubhai Lift Entrance",
+      "bottom_entrance": "Cooper Lift Entrance",
+      "image_url": "/static/floors/floor_7.jpg",
+      "use_image": true,
+      "blocks": [
+        {
+          "x": 30,
+          "y": 32,
+          "w": 200,
+          "h": 600,
+          "type": "facility",
+          "label": "Library"
+        },
+        {
+          "x": 240,
+          "y": 32,
+          "w": 140,
+          "h": 114,
+          "type": "wc",
+          "label": ""
+        },
+        {
+          "x": 390,
+          "y": 32,
+          "w": 140,
+          "h": 114,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 630,
+          "y": 32,
+          "w": 340,
+          "h": 114,
+          "type": "facility",
+          "label": "Faculty Area\n701"
+        },
+        {
+          "x": 300,
+          "y": 218,
+          "w": 400,
+          "h": 40,
+          "type": "lift",
+          "label": "Lift"
+        },
+        {
+          "x": 300,
+          "y": 270,
+          "w": 195,
+          "h": 126,
+          "type": "room",
+          "label": "E. CL 706"
+        },
+        {
+          "x": 505,
+          "y": 270,
+          "w": 195,
+          "h": 126,
+          "type": "room",
+          "label": "E. CC 702"
+        },
+        {
+          "x": 300,
+          "y": 408,
+          "w": 400,
+          "h": 176,
+          "type": "center",
+          "label": "Floor 7"
+        },
+        {
+          "x": 300,
+          "y": 596,
+          "w": 195,
+          "h": 120,
+          "type": "room",
+          "label": "E. CR 704"
+        },
+        {
+          "x": 505,
+          "y": 596,
+          "w": 195,
+          "h": 120,
+          "type": "room",
+          "label": "E. CR 703"
+        },
+        {
+          "x": 300,
+          "y": 726,
+          "w": 400,
+          "h": 40,
+          "type": "lift",
+          "label": "Lift"
+        },
+        {
+          "x": 30,
+          "y": 645,
+          "w": 200,
+          "h": 70,
+          "type": "wc",
+          "label": ""
+        },
+        {
+          "x": 30,
+          "y": 725,
+          "w": 200,
+          "h": 60,
+          "type": "exit_left",
+          "label": "Stairs"
+        },
+        {
+          "x": 770,
+          "y": 160,
+          "w": 200,
+          "h": 110,
+          "type": "room",
+          "label": "E. CR 702"
+        },
+        {
+          "x": 770,
+          "y": 280,
+          "w": 200,
+          "h": 45,
+          "type": "exit_right",
+          "label": ""
+        },
+        {
+          "x": 770,
+          "y": 335,
+          "w": 200,
+          "h": 85,
+          "type": "room",
+          "label": "E. CL 701"
+        },
+        {
+          "x": 770,
+          "y": 430,
+          "w": 200,
+          "h": 85,
+          "type": "room",
+          "label": "E. CL 702"
+        },
+        {
+          "x": 770,
+          "y": 525,
+          "w": 200,
+          "h": 85,
+          "type": "room",
+          "label": "E. CL 703"
+        },
+        {
+          "x": 770,
+          "y": 620,
+          "w": 200,
+          "h": 85,
+          "type": "room",
+          "label": "E. CL 704"
+        },
+        {
+          "x": 770,
+          "y": 715,
+          "w": 200,
+          "h": 50,
+          "type": "exit_right",
+          "label": "Stairs"
+        },
+        {
+          "x": 30,
+          "y": 844,
+          "w": 180,
+          "h": 126,
+          "type": "room",
+          "label": "E. CC 701"
+        },
+        {
+          "x": 220,
+          "y": 844,
+          "w": 180,
+          "h": 126,
+          "type": "room",
+          "label": "E. CR 701"
+        },
+        {
+          "x": 600,
+          "y": 844,
+          "w": 180,
+          "h": 126,
+          "type": "facility",
+          "label": "AR/VR LAB"
+        },
+        {
+          "x": 790,
+          "y": 844,
+          "w": 180,
+          "h": 126,
+          "type": "room",
+          "label": "E. CL 705"
+        }
+      ]
     }
   ]
 }
